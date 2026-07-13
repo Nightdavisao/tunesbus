@@ -5,8 +5,9 @@ package itunes
 import (
 	"errors"
 	"fmt"
-	"log"
 	"time"
+
+	"github.com/charmbracelet/log"
 
 	//"os"
 	"path"
@@ -23,8 +24,7 @@ func GetCurrentTrack(dispatcher *ole.IDispatch) (*IiTrack, error) {
 	if dispatcher == nil {
 		return nil, errors.New("dispatcher is not ready")
 	}
-	//log.Printf("called GetCurrentTrack")
-	var err error = nil
+	
 	trackProp, err := oleutil.GetProperty(dispatcher, "CurrentTrack")
 	track, err := getCOMObjectFromVariant[IiTrack](trackProp, IID_IiTrack)
 	return track, err
@@ -35,22 +35,26 @@ func GetCurrentTunes(dispatcher *ole.IDispatch) (*IiTunes, error) {
 		return nil, errors.New("dispatcher is not ready")
 	}
 
-	soundVolumeVar, err := oleutil.GetProperty(dispatcher, "SoundVolume"); if err != nil {
+	soundVolumeVar, err := oleutil.GetProperty(dispatcher, "SoundVolume")
+	if err != nil {
 		return nil, err
 	}
 	soundVolume := soundVolumeVar.Value().(int32)
 
-	playerPositionVar, err := oleutil.GetProperty(dispatcher, "PlayerPosition"); if err != nil {
+	playerPositionVar, err := oleutil.GetProperty(dispatcher, "PlayerPosition")
+	if err != nil {
 		return nil, err
 	}
 	playerPosition := playerPositionVar.Value().(int32)
 
-	playerPositionMSVar, err := oleutil.GetProperty(dispatcher, "PlayerPositionMS"); if err != nil {
+	playerPositionMSVar, err := oleutil.GetProperty(dispatcher, "PlayerPositionMS")
+	if err != nil {
 		return nil, err
 	}
 	playerPositionMS := playerPositionMSVar.Value().(int32)
 
-	playerStateVar, err := oleutil.GetProperty(dispatcher, "PlayerState"); if err != nil {
+	playerStateVar, err := oleutil.GetProperty(dispatcher, "PlayerState")
+	if err != nil {
 		return nil, err
 	}
 	playerState := playerStateVar.Value().(int32)
@@ -67,17 +71,16 @@ func GetCurrentTunes(dispatcher *ole.IDispatch) (*IiTunes, error) {
 
 func SaveArtworkIfAvaliable(trackDispatcher *ole.IDispatch, track *IiTrack) (dosFilePath string, err error) {
 	artworkPath := ""
-	
+
 	artworkCollection, err := oleutil.GetProperty(trackDispatcher, "Artwork")
 	if err != nil {
 		return artworkPath, err
 	}
-	log.Printf("VT = %#x", artworkCollection.VT)
 	count, err := oleutil.GetProperty(artworkCollection.ToIDispatch(), "Count")
 	if err != nil {
 		return artworkPath, err
 	}
-	log.Printf("artwork count: %d", count.Value())
+	log.Debug("artwork count: %d", count.Value())
 
 	if count.Value().(int32) > 0 {
 		item, err := oleutil.GetProperty(
@@ -107,26 +110,26 @@ func SaveArtworkIfAvaliable(trackDispatcher *ole.IDispatch, track *IiTrack) (dos
 
 		if err == nil {
 			// TODO: check if the file already exists
-			<-time.After(2 * time.Second)
+			<-time.After(200 * time.Millisecond)
 			//os.Mkdir("C:\\Temp", 0755)
 			// :)
 			artworkPath = path.Join("C:\\", fmt.Sprintf("%d%s", track.TrackID, fileSuffix))
-			log.Printf("saved artwork at %s", artworkPath)
-			
+			log.Debug("successfully saved artwork", artworkPath)
+
 			artwork := item.ToIDispatch()
 			r, err := oleutil.CallMethod(
 				artwork,
 				"SaveArtworkToFile",
 				artworkPath,
-			); if err != nil {
+			)
+			if err != nil {
 				return "", err
 			}
-			log.Printf("result for artwork: %v", r)
+			log.Debug("result for artwork", r)
 		}
 	}
 	return artworkPath, err
 }
-
 
 func SetTunesPosition(dispatcher *ole.IDispatch, seconds int64) (err error) {
 	// [id(0x60020021), propput, helpstring("Returns the player's position within the currently playing track in seconds.")]
@@ -193,4 +196,24 @@ func GetPlayerButtonsState(dispatcher *ole.IDispatch) (prevEnabled bool, state i
 	//log.Printf("prev is %d, state is %d, next is %d", prev, state, next)
 
 	return prev != 0, state, next != 0, nil
+}
+
+func SafeGetCurrentPlaylist(tunesDispatcher *ole.IDispatch) (*ole.IDispatch, error) {
+	// safety check
+	_, err := GetCurrentTrack(tunesDispatcher)
+	if err != nil {
+		return nil, nil
+	}
+	
+	currentPlaylist, err := oleutil.GetProperty(tunesDispatcher, "CurrentPlaylist")
+	if err != nil {
+		log.Error("failed to get current playlist", currentPlaylist)
+		return nil, err
+	}
+	playlistDispatcher := currentPlaylist.ToIDispatch()
+
+	if playlistDispatcher != nil {
+		return playlistDispatcher, nil
+	}
+	return nil, nil
 }

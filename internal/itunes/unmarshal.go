@@ -3,7 +3,6 @@ package itunes
 import (
 	"errors"
 	"fmt"
-	"log"
 	"reflect"
 
 	ole "github.com/go-ole/go-ole"
@@ -92,7 +91,6 @@ func getCOMObject[T any](iDispatch *ole.IDispatch, iid string) (*T, error) {
 	disp, err := iDispatch.QueryInterface(guid); if err != nil {
 		return nil, fmt.Errorf("query interface %s: %w", iid, err)
 	}
-	log.Printf("got COM object: %s", iid)
 	defer disp.Release()
 
 	var result T

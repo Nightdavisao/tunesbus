@@ -3,13 +3,15 @@
 package main
 
 import (
-	"log"
+	"flag"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 	"tunesbus/internal/itunes"
 	"tunesbus/internal/wine"
+
+	"github.com/charmbracelet/log"
 
 	"github.com/go-ole/go-ole"
 	"github.com/go-ole/go-ole/oleutil"
@@ -26,7 +28,7 @@ type Root struct {
 }
 
 func (r Root) Raise() error {
-	log.Printf("Raise is not implemented")
+	log.Debug("Raise is not implemented")
 	return nil
 }
 
@@ -40,12 +42,12 @@ func (r Root) CanQuit() (bool, error) {
 }
 
 func (r Root) CanRaise() (bool, error) {
-	log.Printf("CanRaise is not implemented")
+	log.Debug("CanRaise is not implemented")
 	return false, nil
 }
 
 func (r Root) HasTrackList() (bool, error) {
-	log.Printf("HasTrackList is not implemented")
+	log.Debug("HasTrackList is not implemented")
 	return false, nil
 }
 
@@ -134,7 +136,7 @@ func (m *Player) Metadata() (types.Metadata, error) {
 }
 
 func (m *Player) Volume() (float64, error) {
-	return float64(m.state.currentVolume/100), nil
+	return float64(m.state.currentVolume / 100), nil
 }
 
 func (m *Player) SetVolume(volume float64) error {
@@ -184,13 +186,105 @@ func (m *Player) CanControl() (bool, error) {
 	return true, nil
 }
 
+func (m *Player) Shuffle() (bool, error) {
+	playlistDispatcher, err := itunes.SafeGetCurrentPlaylist(m.dispatcher)
+	if err != nil {
+		log.Error("failed to get current playlist on getting Shuffle", err)
+		return false, nil
+	}
+
+	if playlistDispatcher == nil {
+		log.Debug("no playlist yet")
+		return false, nil
+	}
+
+	shuffleStatus, err := oleutil.GetProperty(playlistDispatcher, "Shuffle")
+	log.Debug("shuffle status", shuffleStatus)
+	if err != nil {
+		log.Error("failed to get shuffle status", err)
+		return false, err
+	}
+	return shuffleStatus.Value().(bool), nil
+}
+
+func (m *Player) SetShuffle(shuffle bool) error {
+	playlistDispatcher, err := itunes.SafeGetCurrentPlaylist(m.dispatcher)
+	if err != nil {
+		log.Error("failed to get current playlist on setting Shuffle", err)
+		return nil
+	}
+
+	if playlistDispatcher == nil {
+		log.Debug("no playlist yet")
+		return nil
+	}
+
+	_, err = oleutil.PutProperty(playlistDispatcher, "Shuffle", shuffle)
+	if err != nil {
+		log.Error("failed to put shuffle status", err)
+		return err
+	}
+
+	return err
+}
+
+func (m *Player) LoopStatus() (types.LoopStatus, error) {
+	playlistDispatcher, err := itunes.SafeGetCurrentPlaylist(m.dispatcher)
+	if err != nil {
+		log.Error("failed to get current playlist on getting Loop", err)
+		return types.LoopStatusNone, err
+	}
+
+	if playlistDispatcher == nil {
+		log.Debug("no playlist yet")
+		return types.LoopStatusNone, nil
+	}
+
+	v, err := oleutil.GetProperty(playlistDispatcher, "SongRepeat")
+	if err != nil {
+		return types.LoopStatusNone, err
+	}
+	log.Debug("loop status", v)
+
+	// ITPlayerRepeatMode: 0 = Off, 1 = One (repeat song), 2 = All (repeat playlist)
+	switch v.Val {
+	case 1:
+		return types.LoopStatusTrack, nil
+	case 2:
+		return types.LoopStatusPlaylist, nil
+	default:
+		return types.LoopStatusNone, nil
+	}
+}
+
+func (m *Player) SetLoopStatus(status types.LoopStatus) error {
+	playlistDispatcher, err := itunes.SafeGetCurrentPlaylist(m.dispatcher)
+	if err != nil {
+		log.Error("failed to get current playlist on setting Loop", err)
+		return err
+	}
+
+	var mode int32
+	switch status {
+	case types.LoopStatusTrack:
+		mode = 1
+	case types.LoopStatusPlaylist:
+		mode = 2
+	default:
+		mode = 0
+	}
+	_, err = oleutil.PutProperty(playlistDispatcher, "SongRepeat", mode)
+	return err
+}
+
 type State struct {
-	currentMetadata *types.Metadata
-	currentVolume   int64
-	currentPosition int64
-	isPlaying       bool
-	ticker          *time.Ticker
-	done            chan bool
+	currentMetadata  *types.Metadata
+	currentVolume    int64
+	currentPosition  int64
+	server *server.Server
+	hasServerStarted bool
+	ticker           *time.Ticker
+	doneTicking      chan bool
 }
 
 type eventHandler struct {
@@ -218,42 +312,43 @@ func setInitialMetadata(track *itunes.IiTrack, state *State, afterSetting fn) {
 		}
 		if track.Dispatcher != nil {
 			go func(state *State, track *itunes.IiTrack, afterSetting fn) {
-				//defer trackDispatcher.Release()
-				
-				dosFilename, err := itunes.SaveArtworkIfAvaliable(track.Dispatcher, track); if err != nil {
+				dosFilename, err := itunes.SaveArtworkIfAvaliable(track.Dispatcher, track)
+				if err != nil {
 					log.Printf("failed to retrieve artwork for current track: %v", err)
 					if afterSetting != nil {
 						afterSetting()
 					}
 					return
 				}
-				
-				log.Printf("dos filename for artwork: %s", dosFilename)
-	
-				unixFilename, err := wine.GetUnixFilename(dosFilename); if err != nil {
+
+				log.Debug("dos filename for artwork: %s", dosFilename)
+
+				unixFilename, err := wine.GetUnixFilename(dosFilename)
+				if err != nil {
 					log.Printf("failed to retrieve unix filename for saved artwork: %v", err)
 					if afterSetting != nil {
 						afterSetting()
 					}
 					return
 				}
-	
-				log.Printf("unix filename for artwork: %s", unixFilename)
-	
-				state.currentMetadata.ArtUrl = "file://"+unixFilename
+
+				log.Debug("unix filename for artwork: %s", unixFilename)
+
+				state.currentMetadata.ArtUrl = "file://" + unixFilename
 				if afterSetting != nil {
 					afterSetting()
 				}
 			}(state, track, afterSetting)
 		}
-		
-		log.Printf("successfully set new metadata: %v", state.currentMetadata)
+
+		log.Debug("successfully set new metadata: %v", state.currentMetadata)
 		return
 	}
 
-	// send only the bogus trackid if we don't have anything to begin with
+	// send only the bogus trackid if we don't have anything to begin with (stops godbus/dbus from spamming the console)
+	// might not be needed anymore since we are only starting the mpris server on "demand"
 	state.currentMetadata = &types.Metadata{
-		TrackId: dbus.ObjectPath("/org/mpris/MediaPlayer2/Track/1"),
+		TrackId: dbus.ObjectPath(BogusTrackID),
 	}
 }
 
@@ -274,9 +369,12 @@ func milliToMicro(milli int64) int64 {
 }
 
 func (m *eventHandler) OnPlayerPlayEvent(t *itunes.IiTrack) {
-	log.Printf("OnPlayerPlayEvent %v", t)
+	log.Debug("received OnPlayerPlayEvent %v", t)
 	setInitialMetadata(t, m.state, nil)
-
+	if !m.state.hasServerStarted {
+		go startMprisServer(m.state.server)
+		m.state.hasServerStarted = true
+	}
 }
 
 func (m *eventHandler) OnPlayerStopEvent(t *itunes.IiTrack) {
@@ -305,42 +403,54 @@ func (m *eventHandler) OnQuittingEvent() {
 func (m *eventHandler) OnAboutToPromptUserToQuitEvent() {
 	log.Printf("OnAboutToPromptUserToQuitEvent")
 	m.AboutToQuitCalled = true
-	m.state.done<-true
+	m.state.doneTicking <- true
 	m.dispatcher.Release()
-	itunes.Uninitialize()
 }
 
 func (m *eventHandler) OnSoundVolumeChangedEvent(val *int64) {
 	log.Printf("OnSoundVolumeChangedEvent, %d", *val)
 	<-time.After(2 * time.Second) // we can't really tell if this was from mpris or itunes itself, so we'll be debouncing the emit change
 	m.state.currentVolume = *val
-	m.handler.Player.OnVolume()	
+	m.handler.Player.OnVolume()
+}
+
+func startMprisServer(s *server.Server) {
+	if err := s.Listen(); err != nil {
+		log.Error("startMprisServer failed, quitting", err)
+		os.Exit(1)
+		return
+	}
 }
 
 func main() {
+	debugModePtr := flag.Bool("debug", false, "Enable debug logging")
+	flag.Parse()
+
+	if *debugModePtr {
+		log.SetLevel(log.DebugLevel)
+	}
+
 	c := make(chan os.Signal)
 	signal.Notify(c, syscall.SIGTERM)
+
 	state := &State{
-		ticker:          time.NewTicker(50 * time.Millisecond),
-		currentMetadata: &types.Metadata{},
-		done:            make(chan bool), // shall only be used if the program is quitting...?
+		ticker:           time.NewTicker(200 * time.Millisecond),
+		hasServerStarted: false,
+		currentMetadata:  &types.Metadata{},
+		doneTicking:      make(chan bool), // shall only be used if the program is quitting...?
 	}
-
-	log.Printf("starting up")
-
 	dispatcher, err := itunes.NewTunesDispatch()
 	if err != nil {
-		log.Printf("failed to initialize dispatcher")
-		panic(err)
+		log.Error("failed to initialize dispatcher", err)
+		os.Exit(67)
+		return
 	}
+
 	go func() {
 		<-c
 		dispatcher.Release()
-		itunes.Uninitialize()
 		os.Exit(1)
 	}()
-	//defer dispatcher.Release()
-	//defer itunes.Uninitialize()
 
 	root := Root{
 		dispatcher: dispatcher,
@@ -353,6 +463,7 @@ func main() {
 
 	srv := server.NewServer("iTunes", root, &player)
 	ev := events.NewEventHandler(srv)
+	state.server = srv
 
 	handler := &eventHandler{
 		state:      state,
@@ -363,44 +474,47 @@ func main() {
 	sink, err := itunes.NewCOMEventSink(dispatcher, handler)
 	if err != nil {
 		log.Fatal("something failed when setting up the event sink")
-		panic(err)
+		os.Exit(69)
+		return
 	}
 
 	curr, _ := itunes.GetCurrentTrack(dispatcher)
-	log.Printf("current track: %v", curr)
+	log.Debug("current track", curr)
 	if curr != nil {
 		setInitialMetadata(curr, state, func() {
 			ev.Player.OnAll()
-			//curr.Dispatcher.Release()
 		})
+		// workaround the issue where KDE might *not* pick up our player
+		if !state.hasServerStarted {
+			go startMprisServer(srv)
+			state.hasServerStarted = true
+		}
 	} else {
 		setInitialMetadata(nil, state, nil)
 	}
 
 	go func() {
-		if err := srv.Listen(); err != nil {
-			log.Printf("listen failed: %v", err)
-			panic(err)
-		}
-	}()
-
-	go func() {
 		for {
 			select {
-			case <-state.done:
+			case <-state.doneTicking:
 				return
 			case <-state.ticker.C:
 				if player.dispatcher != nil {
 					tunes, _ := itunes.GetCurrentTunes(player.dispatcher)
 					if tunes != nil {
-						position := time.Duration(tunes.PlayerPositionMS) * time.Millisecond
-						state.currentPosition = position.Microseconds()
-						ev.Player.OnAll()
+						if tunes.PlayerPositionMS > 0 {
+							position := time.Duration(tunes.PlayerPositionMS) * time.Millisecond
+							state.currentPosition = position.Microseconds()
+							ev.Player.OnAll()
+						}
 					}
 				}
 			}
 		}
 	}()
 
-	sink.StartCOMEventLoop()
+	err = sink.ListenEvents()
+	if err != nil {
+		log.Debug("failed to listen for COM events", err)
+	}
 }

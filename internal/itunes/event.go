@@ -3,7 +3,9 @@
 package itunes
 
 import (
-	"log"
+	"errors"
+
+	"github.com/charmbracelet/log"
 	//"runtime"
 	"syscall"
 	"unsafe"
@@ -78,7 +80,7 @@ func getTypeInfo(ptypeif *uintptr) uintptr {
 
 func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GUID, lcid int, flags int16, dispparams *ole.DISPPARAMS, result *ole.VARIANT, pexcepinfo *ole.EXCEPINFO, nerr *uint) uintptr {
 	dp := (*dispParams)(unsafe.Pointer(dispparams))
-	log.Printf("dp: %v, dispid: %v\n", dp, dispid)
+	log.Debug("disp", dp, dispid)
 
 	getTrack := func() *IiTrack {
 		if dp.cArgs == 0 {
@@ -86,7 +88,10 @@ func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GU
 		}
 		first := (*ole.VARIANT)(unsafe.Pointer(dp.rgvarg))
 		//log.Printf("first argument: %s", first)
-		track, _ := getCOMObjectFromVariant[IiTrack](first, IID_IiTrack)
+		track, err := getCOMObjectFromVariant[IiTrack](first, IID_IiTrack)
+		if err != nil {
+			return nil
+		}
 		return track
 	}
 
@@ -129,7 +134,7 @@ func connectObject(disp *ole.IDispatch, iid *ole.GUID, idisp any) (cookie uint32
 	}
 
 	container := (*ole.IConnectionPointContainer)(unsafe.Pointer(unknown))
-	log.Printf("got the connection point container")
+	log.Debug("got the connection point container")
 	defer container.Release()
 
 	var point *ole.IConnectionPoint
@@ -176,17 +181,13 @@ func NewTunesDispatch() (*ole.IDispatch, error) {
 	return iTunesDispatch, err
 }
 
-func Uninitialize() {
-	ole.CoUninitialize()
-}
-
-func (c *COMEventSink) setupEventReceiver() {
-	log.Printf("setting the event receiver up")
+func (c *COMEventSink) ListenEvents() (error) {
+	log.Info("setting the event receiver up")
+	defer ole.CoUninitialize()
 	iid, err := ole.CLSIDFromString(IID_IiTunesEvents)
 	if err != nil {
-		log.Fatalf("failed to query for iTunesEvents object: %v", err)
-		// todo: should we?
-		//panic(err)
+		log.Error("failed to query for iTunesEvents object", err)
+		return err
 	}
 
 	receiver := &eventReceiver{
@@ -204,16 +205,23 @@ func (c *COMEventSink) setupEventReceiver() {
 		host: c.dispatcher,
 	}
 
-	log.Printf("connecting the receiver object")
-	connectObject(c.dispatcher, iid, (*ole.IUnknown)(unsafe.Pointer(receiver)))
+	_, err = connectObject(c.dispatcher, iid, (*ole.IUnknown)(unsafe.Pointer(receiver)))
+	if err != nil {
+		log.Error("failed to connect the eventReceiver object", err)
+		return err
+	}
 
 	var m ole.Msg
-	for receiver.ref != 0 {
-		ole.GetMessage(&m, 0, 0, 0)
-		ole.DispatchMessage(&m)
+	for {
+		if receiver.ref != 0 {
+			ole.GetMessage(&m, 0, 0, 0)
+			ole.DispatchMessage(&m)
+		} else if receiver.ref == -1 {
+			log.Warn("receiver.ref is -1...? we should probably quit.")
+			return errors.New("receiver.ref is -1")
+		} else {
+			break
+		}
 	}
-}
-
-func (c *COMEventSink) StartCOMEventLoop() {
-	c.setupEventReceiver()
+	return nil
 }
