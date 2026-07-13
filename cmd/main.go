@@ -429,6 +429,8 @@ func startMprisServer(s *server.Server) {
 
 func main() {
 	debugModePtr := flag.Bool("debug", false, "Enable debug logging")
+	identityPtr := flag.String("identity", "iTunes", "Custom identity for the MPRIS server\n"+
+		"Tip: Set this to \"cider\" in all lowercase (or use some other whitelisted identity) if you want to make Music Presence pick up the player.")
 	flag.Parse()
 
 	if *debugModePtr {
@@ -466,7 +468,7 @@ func main() {
 		state:      state,
 	}
 
-	srv := server.NewServer("iTunes", root, &player)
+	srv := server.NewServer(*identityPtr, root, &player)
 	ev := events.NewEventHandler(srv)
 	state.server = srv
 
