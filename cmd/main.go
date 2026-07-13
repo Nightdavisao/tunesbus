@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 	"tunesbus/internal/itunes"
+	"tunesbus/internal/wine"
 
 	"github.com/go-ole/go-ole"
 	"github.com/go-ole/go-ole/oleutil"
@@ -15,7 +16,9 @@ import (
 	"github.com/quarckster/go-mpris-server/pkg/types"
 )
 
-type Root struct{
+const BogusTrackID = "/org/mpris/MediaPlayer2/Track/1"
+
+type Root struct {
 	dispatcher *ole.IDispatch
 }
 
@@ -56,7 +59,7 @@ func (r Root) SupportedMimeTypes() ([]string, error) {
 }
 
 type Player struct {
-	state *State
+	state      *State
 	dispatcher *ole.IDispatch
 }
 
@@ -95,8 +98,8 @@ func (m *Player) Seek(offset types.Microseconds) error {
 }
 
 func (m *Player) SetPosition(trackId string, position types.Microseconds) error {
-	// TODO: how does this translate to mpris?
-	_, err := oleutil.CallMethod(m.dispatcher, "PlayerPosition", position)
+	seconds := (time.Duration(position) * time.Microsecond) / time.Second
+	err := itunes.SetTunesPosition(m.dispatcher, int64(seconds))
 	return err
 }
 
@@ -128,11 +131,12 @@ func (m *Player) Metadata() (types.Metadata, error) {
 }
 
 func (m *Player) Volume() (float64, error) {
-	return float64(m.state.currentVolume), nil
+	return float64(m.state.currentVolume/100), nil
 }
 
 func (m *Player) SetVolume(volume float64) error {
-	return nil
+	_, err := oleutil.PutProperty(m.dispatcher, "SoundVolume", volume*100)
+	return err
 }
 
 func (m *Player) Position() (int64, error) {
@@ -148,23 +152,29 @@ func (m *Player) MaximumRate() (float64, error) {
 }
 
 func (m *Player) CanGoNext() (bool, error) {
-	return true, nil
+	_, _, nextEnabled, err := itunes.GetPlayerButtonsState(m.dispatcher)
+	return nextEnabled, err
 }
 
 func (m *Player) CanGoPrevious() (bool, error) {
-	return true, nil
+	previousEnabled, _, _, err := itunes.GetPlayerButtonsState(m.dispatcher)
+	return previousEnabled, err
 }
 
 func (m *Player) CanPlay() (bool, error) {
-	return true, nil
+	_, buttonState, _, err := itunes.GetPlayerButtonsState(m.dispatcher)
+	return buttonState != itunes.ITPlayButtonStatePauseDisabled &&
+		buttonState != itunes.ITPlayButtonStatePlayDisabled, err
 }
 
 func (m *Player) CanPause() (bool, error) {
-	return true, nil
+	_, buttonState, _, err := itunes.GetPlayerButtonsState(m.dispatcher)
+	return buttonState != itunes.ITPlayButtonStatePauseDisabled &&
+		buttonState != itunes.ITPlayButtonStatePlayDisabled, err
 }
 
 func (m *Player) CanSeek() (bool, error) {
-	return false, nil
+	return true, nil
 }
 
 func (m *Player) CanControl() (bool, error) {
@@ -181,10 +191,10 @@ type State struct {
 }
 
 type eventHandler struct {
-	state        *State
-	dispatcher   *ole.IDispatch
-	mprisPlayer  *Player
-	mprisHandler *events.EventHandler
+	state      *State
+	dispatcher *ole.IDispatch
+	player     *Player
+	handler    *events.EventHandler
 
 	QuitCalled        bool
 	AboutToQuitCalled bool
@@ -192,17 +202,35 @@ type eventHandler struct {
 
 type fn func()
 
-func setInitialMetadata(track *itunes.IiTrack, state *State, afterSetting fn) {
+func setInitialMetadata(track *itunes.IiTrack, trackDispatcher *ole.IDispatch, state *State, afterSetting fn) {
 	if track != nil {
 		*state.currentMetadata = types.Metadata{
-			TrackId: dbus.ObjectPath("/org/mpris/MediaPlayer2/Track/1"),
-			Album: track.Album,
-			Title: track.Name,
-			Artist: []string{track.Artist},
-			Length: types.Microseconds(secondsToMicro(track.Duration)),
-			DiscNumber: int(track.DiscNumber),
+			TrackId:     dbus.ObjectPath("/org/mpris/MediaPlayer2/Track/1"),
+			Album:       track.Album,
+			Title:       track.Name,
+			Artist:      []string{track.Artist},
+			Length:      types.Microseconds(secondsToMicro(track.Duration)),
+			DiscNumber:  int(track.DiscNumber),
 			TrackNumber: int(track.TrackNumber),
 		}
+		if trackDispatcher != nil {
+			go func(state *State, track *itunes.IiTrack) {
+				dosFilename, err := itunes.SaveArtworkIfAvaliable(trackDispatcher, track); if err != nil {
+					log.Printf("failed to retrieve artwork for current track: %v", err)
+				}
+				
+				log.Printf("dos filename for artwork: %s", dosFilename)
+	
+				unixFilename, err := wine.GetUnixFilename(dosFilename); if err != nil {
+					log.Printf("failed to retrieve unix filename for saved artwork: %v", err)
+				}
+	
+				log.Printf("unix filename for artwork: %s", unixFilename)
+	
+				state.currentMetadata.ArtUrl = "file://"+unixFilename
+			}(state, track)
+		}
+		
 		log.Printf("successfully set new metadata: %v", state.currentMetadata)
 		if afterSetting != nil {
 			afterSetting()
@@ -217,13 +245,9 @@ func setInitialMetadata(track *itunes.IiTrack, state *State, afterSetting fn) {
 }
 
 func setPosition(tunes *itunes.IiTunes, state *State) {
-	//mu.Lock()
 	if tunes != nil {
-		//mu.Lock()
 		state.currentPosition = milliToMicro(tunes.PlayerPositionMS)
-		//mu.Unlock()
 	}
-	//mu.Unlock()
 }
 
 func secondsToMicro(seconds int64) int64 {
@@ -237,23 +261,23 @@ func milliToMicro(milli int64) int64 {
 }
 
 func (m *eventHandler) OnPlayerPlayEvent(t *itunes.IiTrack) {
-	log.Printf("mock: OnPlayerPlayEvent %v", t)
-	setInitialMetadata(t, m.state, nil)
+	log.Printf("OnPlayerPlayEvent %v", t)
+	setInitialMetadata(t, t.Dispatcher, m.state, nil)
 
 }
 
 func (m *eventHandler) OnPlayerStopEvent(t *itunes.IiTrack) {
 	log.Printf("OnPlayerStopEvent: %v", t)
-	setInitialMetadata(t, m.state, func() {
-		m.mprisHandler.Player.OnPlayback()
-		m.mprisHandler.Player.OnPlayPause()
+	setInitialMetadata(t, t.Dispatcher, m.state, func() {
+		m.handler.Player.OnPlayback()
+		m.handler.Player.OnPlayPause()
 	})
 }
 
 func (m *eventHandler) OnPlayerPlayingTrackChangedEvent(t *itunes.IiTrack) {
 	log.Printf("OnPlayerPlayingTrackChangedEvent: %v", t)
-	setInitialMetadata(t, m.state, func() {
-		m.mprisHandler.Player.OnPlayback()
+	setInitialMetadata(t, t.Dispatcher, m.state, func() {
+		m.handler.Player.OnPlayback()
 	})
 }
 
@@ -270,19 +294,17 @@ func (m *eventHandler) OnAboutToPromptUserToQuitEvent() {
 }
 
 func (m *eventHandler) OnSoundVolumeChangedEvent(val *int64) {
-	log.Printf("OnSoundVolumeChangedEvent, %v", val)
+	log.Printf("OnSoundVolumeChangedEvent, %d", *val)
+	<-time.After(2 * time.Second) // we can't really tell if this was from mpris or itunes itself, so we'll be debouncing the emit change
 	m.state.currentVolume = *val
-	m.mprisHandler.Player.OnVolume()
+	m.handler.Player.OnVolume()	
 }
 
 func main() {
-	//runtime.LockOSThread()
-	//defer runtime.UnlockOSThread()
-
 	state := &State{
-		ticker: time.NewTicker(200 * time.Millisecond),
+		ticker:          time.NewTicker(50 * time.Millisecond),
 		currentMetadata: &types.Metadata{},
-		done:   make(chan bool), // shall only be used if the program is quitting...?
+		done:            make(chan bool), // shall only be used if the program is quitting...?
 	}
 
 	log.Printf("starting up")
@@ -299,40 +321,40 @@ func main() {
 
 	player := Player{
 		dispatcher: dispatcher,
-		state: state,
+		state:      state,
 	}
 
 	srv := server.NewServer("iTunes", root, &player)
 	ev := events.NewEventHandler(srv)
 
 	handler := &eventHandler{
-		state: state,
-		mprisHandler: ev,
-		dispatcher:   dispatcher,
+		state:      state,
+		handler:    ev,
+		dispatcher: dispatcher,
 	}
 
-	sink, err := itunes.NewCOMEventSink(dispatcher, handler); if err != nil {
+	sink, err := itunes.NewCOMEventSink(dispatcher, handler)
+	if err != nil {
 		log.Fatal("something failed when setting up the event sink")
 		panic(err)
 	}
-	
+
 	curr, _ := itunes.GetCurrentTrack(dispatcher)
 	log.Printf("current track: %v", curr)
 	if curr != nil {
-		setInitialMetadata(curr, state, func() {
+		setInitialMetadata(curr, curr.Dispatcher, state, func() {
 			ev.Player.OnAll()
 		})
 	} else {
-		setInitialMetadata(nil, state, nil)
+		setInitialMetadata(nil, nil, state, nil)
 	}
-	
+
 	go func() {
 		if err := srv.Listen(); err != nil {
 			log.Printf("listen failed: %v", err)
 			panic(err)
 		}
 	}()
-
 
 	go func() {
 		for {
@@ -345,7 +367,7 @@ func main() {
 					if tunes != nil {
 						position := time.Duration(tunes.PlayerPositionMS) * time.Millisecond
 						state.currentPosition = position.Microseconds()
-						ev.Player.OnAll()			
+						ev.Player.OnAll()
 					}
 				}
 			}

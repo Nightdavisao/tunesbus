@@ -20,10 +20,20 @@ func unmarshalCOM(disp *ole.IDispatch, dst any) error {
 
 	for i := 0; i < rt.NumField(); i++ {
 		field := rt.Field(i)
+		fv := rv.Field(i)
 		tag, ok := field.Tag.Lookup("com")
+
+		if ok && tag == "self" {
+			if fv.Type() != reflect.TypeOf(disp) {
+				return fmt.Errorf("field %q tagged com:\"self\" must be *ole.IDispatch", field.Name)
+			}
+			fv.Set(reflect.ValueOf(disp))
+			continue
+		}
 		if ok && tag == "-" {
 			continue
 		}
+		
 		propName := field.Name
 		if ok && tag != "" {
 			propName = tag
@@ -34,7 +44,6 @@ func unmarshalCOM(disp *ole.IDispatch, dst any) error {
 			return fmt.Errorf("get property %q for field %q: %w", tag, field.Name, err)
 		}
 
-		fv := rv.Field(i)
 		if err := assign(fv, variant); err != nil {
 			variant.Clear()
 			return fmt.Errorf("assign property %q to field %q: %w", tag, field.Name, err)

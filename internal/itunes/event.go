@@ -76,13 +76,6 @@ func getTypeInfo(ptypeif *uintptr) uintptr {
 	return ole.E_NOTIMPL
 }
 
-type dispParams struct {
-	rgvarg            uintptr
-	rgdispidNamedArgs uintptr
-	cArgs             uint32
-	cNamedArgs        uint32
-}
-
 func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GUID, lcid int, flags int16, dispparams *ole.DISPPARAMS, result *ole.VARIANT, pexcepinfo *ole.EXCEPINFO, nerr *uint) uintptr {
 	dp := (*dispParams)(unsafe.Pointer(dispparams))
 	log.Printf("dp: %v, dispid: %v\n", dp, dispid)

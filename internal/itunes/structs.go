@@ -1,5 +1,7 @@
 package itunes
 
+import "github.com/go-ole/go-ole"
+
 type TunesEventHandler interface {
     OnPlayerPlayEvent(*IiTrack)
     OnPlayerStopEvent(*IiTrack)
@@ -10,6 +12,7 @@ type TunesEventHandler interface {
 }
 
 type IiTrack struct {
+	Dispatcher *ole.IDispatch `com:"self"`
 	Name string
 	Artist string
 	Album string
@@ -17,10 +20,12 @@ type IiTrack struct {
 	DiscNumber int64
 	TrackNumber int64
 	TrackCount int64
+	TrackID int64 `com:"trackID"`
 }
 
 // float = int64
 type IiTunes struct {
+	Dispatcher *ole.IDispatch `com:"self"`
 	CanSetShuffle bool
 	CanSetSongRepeat bool
 	//CurrentTrack IiTrack
@@ -36,4 +41,11 @@ type IiTunes struct {
 	Time string
 	trackID int64
 	// BackTrack, NextTrack, Resume, Play, PlayPause
+}
+
+type dispParams struct {
+	rgvarg            uintptr
+	rgdispidNamedArgs uintptr
+	cArgs             uint32
+	cNamedArgs        uint32
 }
