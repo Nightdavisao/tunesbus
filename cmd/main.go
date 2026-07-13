@@ -4,6 +4,9 @@ package main
 
 import (
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 	"tunesbus/internal/itunes"
 	"tunesbus/internal/wine"
@@ -202,7 +205,7 @@ type eventHandler struct {
 
 type fn func()
 
-func setInitialMetadata(track *itunes.IiTrack, trackDispatcher *ole.IDispatch, state *State, afterSetting fn) {
+func setInitialMetadata(track *itunes.IiTrack, state *State, afterSetting fn) {
 	if track != nil {
 		*state.currentMetadata = types.Metadata{
 			TrackId:     dbus.ObjectPath("/org/mpris/MediaPlayer2/Track/1"),
@@ -213,28 +216,38 @@ func setInitialMetadata(track *itunes.IiTrack, trackDispatcher *ole.IDispatch, s
 			DiscNumber:  int(track.DiscNumber),
 			TrackNumber: int(track.TrackNumber),
 		}
-		if trackDispatcher != nil {
-			go func(state *State, track *itunes.IiTrack) {
-				dosFilename, err := itunes.SaveArtworkIfAvaliable(trackDispatcher, track); if err != nil {
+		if track.Dispatcher != nil {
+			go func(state *State, track *itunes.IiTrack, afterSetting fn) {
+				//defer trackDispatcher.Release()
+				
+				dosFilename, err := itunes.SaveArtworkIfAvaliable(track.Dispatcher, track); if err != nil {
 					log.Printf("failed to retrieve artwork for current track: %v", err)
+					if afterSetting != nil {
+						afterSetting()
+					}
+					return
 				}
 				
 				log.Printf("dos filename for artwork: %s", dosFilename)
 	
 				unixFilename, err := wine.GetUnixFilename(dosFilename); if err != nil {
 					log.Printf("failed to retrieve unix filename for saved artwork: %v", err)
+					if afterSetting != nil {
+						afterSetting()
+					}
+					return
 				}
 	
 				log.Printf("unix filename for artwork: %s", unixFilename)
 	
 				state.currentMetadata.ArtUrl = "file://"+unixFilename
-			}(state, track)
+				if afterSetting != nil {
+					afterSetting()
+				}
+			}(state, track, afterSetting)
 		}
 		
 		log.Printf("successfully set new metadata: %v", state.currentMetadata)
-		if afterSetting != nil {
-			afterSetting()
-		}
 		return
 	}
 
@@ -246,7 +259,7 @@ func setInitialMetadata(track *itunes.IiTrack, trackDispatcher *ole.IDispatch, s
 
 func setPosition(tunes *itunes.IiTunes, state *State) {
 	if tunes != nil {
-		state.currentPosition = milliToMicro(tunes.PlayerPositionMS)
+		state.currentPosition = milliToMicro(int64(tunes.PlayerPositionMS))
 	}
 }
 
@@ -262,22 +275,24 @@ func milliToMicro(milli int64) int64 {
 
 func (m *eventHandler) OnPlayerPlayEvent(t *itunes.IiTrack) {
 	log.Printf("OnPlayerPlayEvent %v", t)
-	setInitialMetadata(t, t.Dispatcher, m.state, nil)
+	setInitialMetadata(t, m.state, nil)
 
 }
 
 func (m *eventHandler) OnPlayerStopEvent(t *itunes.IiTrack) {
 	log.Printf("OnPlayerStopEvent: %v", t)
-	setInitialMetadata(t, t.Dispatcher, m.state, func() {
+	setInitialMetadata(t, m.state, func() {
 		m.handler.Player.OnPlayback()
 		m.handler.Player.OnPlayPause()
+		//t.Dispatcher.Release()
 	})
 }
 
 func (m *eventHandler) OnPlayerPlayingTrackChangedEvent(t *itunes.IiTrack) {
 	log.Printf("OnPlayerPlayingTrackChangedEvent: %v", t)
-	setInitialMetadata(t, t.Dispatcher, m.state, func() {
+	setInitialMetadata(t, m.state, func() {
 		m.handler.Player.OnPlayback()
+		//t.Dispatcher.Release()
 	})
 }
 
@@ -288,9 +303,11 @@ func (m *eventHandler) OnQuittingEvent() {
 }
 
 func (m *eventHandler) OnAboutToPromptUserToQuitEvent() {
-	m.AboutToQuitCalled = true
-	//m.state.done<-true
 	log.Printf("OnAboutToPromptUserToQuitEvent")
+	m.AboutToQuitCalled = true
+	m.state.done<-true
+	m.dispatcher.Release()
+	itunes.Uninitialize()
 }
 
 func (m *eventHandler) OnSoundVolumeChangedEvent(val *int64) {
@@ -301,6 +318,8 @@ func (m *eventHandler) OnSoundVolumeChangedEvent(val *int64) {
 }
 
 func main() {
+	c := make(chan os.Signal)
+	signal.Notify(c, syscall.SIGTERM)
 	state := &State{
 		ticker:          time.NewTicker(50 * time.Millisecond),
 		currentMetadata: &types.Metadata{},
@@ -314,6 +333,14 @@ func main() {
 		log.Printf("failed to initialize dispatcher")
 		panic(err)
 	}
+	go func() {
+		<-c
+		dispatcher.Release()
+		itunes.Uninitialize()
+		os.Exit(1)
+	}()
+	//defer dispatcher.Release()
+	//defer itunes.Uninitialize()
 
 	root := Root{
 		dispatcher: dispatcher,
@@ -342,11 +369,12 @@ func main() {
 	curr, _ := itunes.GetCurrentTrack(dispatcher)
 	log.Printf("current track: %v", curr)
 	if curr != nil {
-		setInitialMetadata(curr, curr.Dispatcher, state, func() {
+		setInitialMetadata(curr, state, func() {
 			ev.Player.OnAll()
+			//curr.Dispatcher.Release()
 		})
 	} else {
-		setInitialMetadata(nil, nil, state, nil)
+		setInitialMetadata(nil, state, nil)
 	}
 
 	go func() {

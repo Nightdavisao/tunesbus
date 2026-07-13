@@ -35,25 +35,31 @@ func GetCurrentTunes(dispatcher *ole.IDispatch) (*IiTunes, error) {
 		return nil, errors.New("dispatcher is not ready")
 	}
 
-	var err error = nil
+	soundVolumeVar, err := oleutil.GetProperty(dispatcher, "SoundVolume"); if err != nil {
+		return nil, err
+	}
+	soundVolume := soundVolumeVar.Value().(int32)
 
-	soundVolumeVar, err := oleutil.GetProperty(dispatcher, "SoundVolume")
-	soundVolume := int(soundVolumeVar.Val)
+	playerPositionVar, err := oleutil.GetProperty(dispatcher, "PlayerPosition"); if err != nil {
+		return nil, err
+	}
+	playerPosition := playerPositionVar.Value().(int32)
 
-	playerPositionVar, err := oleutil.GetProperty(dispatcher, "PlayerPosition")
-	playerPosition := int(playerPositionVar.Val)
+	playerPositionMSVar, err := oleutil.GetProperty(dispatcher, "PlayerPositionMS"); if err != nil {
+		return nil, err
+	}
+	playerPositionMS := playerPositionMSVar.Value().(int32)
 
-	playerPositionMSVar, err := oleutil.GetProperty(dispatcher, "PlayerPositionMS")
-	playerPositionMS := int(playerPositionMSVar.Val)
-
-	playerStateVar, err := oleutil.GetProperty(dispatcher, "PlayerState")
-	playerState := int(playerStateVar.Val)
+	playerStateVar, err := oleutil.GetProperty(dispatcher, "PlayerState"); if err != nil {
+		return nil, err
+	}
+	playerState := playerStateVar.Value().(int32)
 
 	tunes := &IiTunes{
-		SoundVolume:      int64(soundVolume),
-		PlayerPosition:   int32(playerPosition),
-		PlayerPositionMS: int64(playerPositionMS),
-		PlayerState:      int32(playerState),
+		SoundVolume:      soundVolume,
+		PlayerPosition:   playerPosition,
+		PlayerPositionMS: playerPositionMS,
+		PlayerState:      playerState,
 	}
 
 	return tunes, err

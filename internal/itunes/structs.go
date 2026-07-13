@@ -34,9 +34,9 @@ type IiTunes struct {
 	// [id(0x60020021), propput, helpstring("Returns the player's position within the currently playing track in seconds.")]
 	// void _stdcall PlayerPosition([in] long rhs);
 	PlayerPosition int32 // can we set the position?
-	PlayerPositionMS int64
+	PlayerPositionMS int32
 	PlayerState int32
-	SoundVolume int64
+	SoundVolume int32
 	Rating int64
 	Time string
 	trackID int64
