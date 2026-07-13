@@ -7,7 +7,9 @@ First, open iTunes. Then, open this program. This should be all.
 This was tested on wine-11.12 (Staging), iTunes 12.12.0.6, 64-bits, for which you can download [here](https://appledb.dev/firmware/iTunes/12.12.0.6.html). The latest version doesn't install on Wine at all, but if it ever does, probably this program *should* work (assuming that nothing was changed on iTunes' COM interface)  
 
 WineHQ report for this version: https://appdb.winehq.org/objectManager.php?sClass=version&iId=31322  
-Recommended winetricks verbs: `dxvk windowmanagerdecorated=n fontsmooth=rgb`. Do not install anything related to WShell.Host, this program doesn't need it and Wine's OLE will break if you do so.
+Recommended winetricks verbs: `dxvk windowmanagerdecorated=n fontsmooth=rgb`.  
+
+Do not install anything related to WShell.Host, this program doesn't need it and Wine's OLE will break if you do so.
 
 ## Compiling
 Fortunately, you can cross-compile for Windows/Wine (the intended target) without any issues:
