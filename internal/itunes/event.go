@@ -181,7 +181,7 @@ func NewTunesDispatch() (*ole.IDispatch, error) {
 	return iTunesDispatch, err
 }
 
-func (c *COMEventSink) ListenEvents() (error) {
+func (c *COMEventSink) ListenEvents(done chan struct{}) error {
 	log.Info("setting the event receiver up")
 	defer ole.CoUninitialize()
 	iid, err := ole.CLSIDFromString(IID_IiTunesEvents)
@@ -211,17 +211,31 @@ func (c *COMEventSink) ListenEvents() (error) {
 		return err
 	}
 
-	var m ole.Msg
+	var msg ole.Msg
 	for {
-		if receiver.ref != 0 {
-			ole.GetMessage(&m, 0, 0, 0)
-			ole.DispatchMessage(&m)
-		} else if receiver.ref == -1 {
-			log.Warn("receiver.ref is -1...? we should probably quit.")
-			return errors.New("receiver.ref is -1")
-		} else {
-			break
+		select {
+		case <-done:
+			log.Debug("received done msg on com event loop")
+			return nil
+		default:
+			if receiver.ref != 0 {
+				ret, err := ole.GetMessage(&msg, 0, 0, 0)
+				if err != nil {
+					log.Error("failed on ret", ret)
+					return nil
+				}
+				if ret == 0 {
+					log.Debug("ret is 0")
+					break
+				}
+				log.Debug("dispatching message")
+				ole.DispatchMessage(&msg)
+			}
+
+			if receiver.ref == -1 {
+				log.Warn("receiver.ref is -1...? we should probably quit.")
+				return errors.New("receiver.ref is -1")
+			}
 		}
 	}
-	return nil
 }

@@ -285,7 +285,7 @@ type State struct {
 	server           *server.Server
 	hasServerStarted bool
 	ticker           *time.Ticker
-	doneTicking      chan bool
+	done             chan struct{}
 }
 
 type eventHandler struct {
@@ -396,16 +396,16 @@ func (m *eventHandler) OnPlayerPlayingTrackChangedEvent(t *itunes.IiTrack) {
 }
 
 func (m *eventHandler) OnQuittingEvent() {
+	log.Debug("received OnQuittingEvent")
 	m.QuitCalled = true
-	//m.state.done<-true
-	log.Printf("OnQuittingEvent")
+	os.Exit(0)
 }
 
 func (m *eventHandler) OnAboutToPromptUserToQuitEvent() {
 	log.Debug("received OnAboutToPromptUserToQuitEvent")
 	m.AboutToQuitCalled = true
-	m.state.doneTicking <- true
 	m.dispatcher.Release()
+	m.state.done <- struct{}{}
 	// todo: 20seg~ timer to reconnect everything if that dialog happens to show up and the user clicks "Don't Quit"
 }
 
@@ -442,7 +442,7 @@ func main() {
 		ticker:           time.NewTicker(50 * time.Millisecond),
 		hasServerStarted: false,
 		currentMetadata:  &types.Metadata{},
-		doneTicking:      make(chan bool),
+		done:             make(chan struct{}),
 	}
 	dispatcher, err := itunes.NewTunesDispatch()
 	if err != nil {
@@ -501,7 +501,7 @@ func main() {
 	go func() {
 		for {
 			select {
-			case <-state.doneTicking:
+			case <-state.done:
 				return
 			case <-state.ticker.C:
 				if player.dispatcher != nil {
@@ -518,7 +518,7 @@ func main() {
 		}
 	}()
 
-	err = sink.ListenEvents()
+	err = sink.ListenEvents(state.done)
 	if err != nil {
 		log.Debug("failed to listen for COM events", err)
 	}
