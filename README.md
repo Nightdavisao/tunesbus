@@ -11,7 +11,7 @@ Recommended winetricks verbs: `dxvk windowmanagerdecorated=n fontsmooth=rgb`. Do
 
 ## Compiling
 Fortunately, you can cross-compile for Windows/Wine (the intended target) without any issues:
-```
+```bash
 GOOS=windows GOARCH=amd64 go build -o tunescomtest.exe cmd/main.go 
 ```
 The modified godbus/dbus code used for this project is not avaliable (yet), so you might be able to compile it, but the program won't be able to connect to the dbus socket (since this library doesn't compile the relevant code for that on Windows targets and it only supports dbus connections with Unix file descriptors, something we don't have on Wine)  
