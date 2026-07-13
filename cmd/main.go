@@ -4,6 +4,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -21,7 +22,7 @@ import (
 	"github.com/quarckster/go-mpris-server/pkg/types"
 )
 
-const BogusTrackID = "/org/mpris/MediaPlayer2/Track/1"
+const BogusTrackID = "/org/mpris/MediaPlayer2/Track/0"
 
 type Root struct {
 	dispatcher *ole.IDispatch
@@ -281,7 +282,7 @@ type State struct {
 	currentMetadata  *types.Metadata
 	currentVolume    int64
 	currentPosition  int64
-	server *server.Server
+	server           *server.Server
 	hasServerStarted bool
 	ticker           *time.Ticker
 	doneTicking      chan bool
@@ -302,7 +303,7 @@ type fn func()
 func setInitialMetadata(track *itunes.IiTrack, state *State, afterSetting fn) {
 	if track != nil {
 		*state.currentMetadata = types.Metadata{
-			TrackId:     dbus.ObjectPath("/org/mpris/MediaPlayer2/Track/1"),
+			TrackId:     dbus.ObjectPath(fmt.Sprintf("/org/mpris/MediaPlayer2/Track/%d", track.TrackID)),
 			Album:       track.Album,
 			Title:       track.Name,
 			Artist:      []string{track.Artist},
@@ -418,7 +419,7 @@ func (m *eventHandler) OnSoundVolumeChangedEvent(val *int64) {
 func startMprisServer(s *server.Server) {
 	log.Info("starting MPRIS server...")
 	err := s.Listen()
-	
+
 	if err != nil {
 		log.Error("startMprisServer failed, quitting", err)
 		os.Exit(1)
