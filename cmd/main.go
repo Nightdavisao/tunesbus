@@ -378,7 +378,7 @@ func (m *eventHandler) OnPlayerPlayEvent(t *itunes.IiTrack) {
 }
 
 func (m *eventHandler) OnPlayerStopEvent(t *itunes.IiTrack) {
-	log.Printf("OnPlayerStopEvent: %v", t)
+	log.Debug("received OnPlayerStopEvent", t)
 	setInitialMetadata(t, m.state, func() {
 		m.handler.Player.OnPlayback()
 		m.handler.Player.OnPlayPause()
@@ -401,21 +401,25 @@ func (m *eventHandler) OnQuittingEvent() {
 }
 
 func (m *eventHandler) OnAboutToPromptUserToQuitEvent() {
-	log.Printf("OnAboutToPromptUserToQuitEvent")
+	log.Debug("received OnAboutToPromptUserToQuitEvent")
 	m.AboutToQuitCalled = true
 	m.state.doneTicking <- true
 	m.dispatcher.Release()
+	// todo: 20seg~ timer to reconnect everything if that dialog happens to show up and the user clicks "Don't Quit"
 }
 
 func (m *eventHandler) OnSoundVolumeChangedEvent(val *int64) {
-	log.Printf("OnSoundVolumeChangedEvent, %d", *val)
+	log.Debug("received OnSoundVolumeChangedEvent", *val)
 	<-time.After(2 * time.Second) // we can't really tell if this was from mpris or itunes itself, so we'll be debouncing the emit change
 	m.state.currentVolume = *val
 	m.handler.Player.OnVolume()
 }
 
 func startMprisServer(s *server.Server) {
-	if err := s.Listen(); err != nil {
+	log.Info("starting MPRIS server...")
+	err := s.Listen()
+	
+	if err != nil {
 		log.Error("startMprisServer failed, quitting", err)
 		os.Exit(1)
 		return
@@ -430,14 +434,14 @@ func main() {
 		log.SetLevel(log.DebugLevel)
 	}
 
-	c := make(chan os.Signal)
-	signal.Notify(c, syscall.SIGTERM)
+	sigtermChan := make(chan os.Signal)
+	signal.Notify(sigtermChan, syscall.SIGTERM)
 
 	state := &State{
-		ticker:           time.NewTicker(200 * time.Millisecond),
+		ticker:           time.NewTicker(50 * time.Millisecond),
 		hasServerStarted: false,
 		currentMetadata:  &types.Metadata{},
-		doneTicking:      make(chan bool), // shall only be used if the program is quitting...?
+		doneTicking:      make(chan bool),
 	}
 	dispatcher, err := itunes.NewTunesDispatch()
 	if err != nil {
@@ -447,7 +451,7 @@ func main() {
 	}
 
 	go func() {
-		<-c
+		<-sigtermChan
 		dispatcher.Release()
 		os.Exit(1)
 	}()
@@ -473,7 +477,7 @@ func main() {
 
 	sink, err := itunes.NewCOMEventSink(dispatcher, handler)
 	if err != nil {
-		log.Fatal("something failed when setting up the event sink")
+		log.Error("something failed when setting up the event sink", err)
 		os.Exit(69)
 		return
 	}
