@@ -38,7 +38,8 @@ func (r BusRoot) Raise() error {
 
 func (r BusRoot) Quit() error {
 	if r.state.tunesDispatcher != nil {
-		_, err := oleutil.CallMethod(r.state.tunesDispatcher, "Quit")
+		r, err := oleutil.CallMethod(r.state.tunesDispatcher, "Quit")
+		r.Clear()
 		return err
 	}
 	r.state.QuitSafely(nil, "")
@@ -77,32 +78,38 @@ type BusPlayer struct {
 }
 
 func (m *BusPlayer) Next() error {
-	_, err := oleutil.CallMethod(m.dispatcher, "NextTrack")
+	r, err := oleutil.CallMethod(m.dispatcher, "NextTrack")
+	r.Clear()
 	return err
 }
 
 func (m *BusPlayer) Previous() error {
-	_, err := oleutil.CallMethod(m.dispatcher, "PreviousTrack")
+	r, err := oleutil.CallMethod(m.dispatcher, "PreviousTrack")
+	r.Clear()
 	return err
 }
 
 func (m *BusPlayer) Pause() error {
-	_, err := oleutil.CallMethod(m.dispatcher, "Pause")
+	r, err := oleutil.CallMethod(m.dispatcher, "Pause")
+	r.Clear()
 	return err
 }
 
 func (m *BusPlayer) PlayPause() error {
-	_, err := oleutil.CallMethod(m.dispatcher, "PlayPause")
+	r, err := oleutil.CallMethod(m.dispatcher, "PlayPause")
+	r.Clear()
 	return err
 }
 
 func (m *BusPlayer) Stop() error {
-	_, err := oleutil.CallMethod(m.dispatcher, "Stop")
+	r, err := oleutil.CallMethod(m.dispatcher, "Stop")
+	r.Clear()
 	return err
 }
 
 func (m *BusPlayer) Play() error {
-	_, err := oleutil.CallMethod(m.dispatcher, "Play")
+	r, err := oleutil.CallMethod(m.dispatcher, "Play")
+	r.Clear()
 	return err
 }
 
