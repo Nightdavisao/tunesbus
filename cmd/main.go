@@ -3,7 +3,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -301,7 +300,7 @@ func (m *BusPlayer) LoopStatus() (types.LoopStatus, error) {
 
 func (m *BusPlayer) SetLoopStatus(status types.LoopStatus) error {
 	m.state.mux.Lock()
-	defer m.state.mux.Lock()
+	defer m.state.mux.Unlock()
 
 	playlistDispatcher, err := itunes.SafeGetCurrentPlaylist(m.dispatcher)
 	if err != nil {
@@ -339,6 +338,7 @@ type State struct {
 	config          Config
 	tunesDispatcher *ole.IDispatch
 	mux             sync.RWMutex
+	quitOnce        sync.Once
 	currentMetadata *types.Metadata
 	artworkCache    WeakTrackArtworkCache
 	currentVolume   int64
@@ -357,14 +357,15 @@ type tunesEventHandler struct {
 
 type fn func()
 
+func ensureValidTrackID(metadata *types.Metadata) {
+	if metadata.TrackId == "" {
+		metadata.TrackId = dbus.ObjectPath(BogusTrackID)
+	}
+}
+
 func setPlayerMetadata(track *itunes.IiTrack, state *State) error {
 	state.mux.Lock()
 	defer state.mux.Unlock()
-
-	if state.server.Conn == nil {
-		log.Debug("dbus server connection is not ready yet")
-		return errors.New("not connected to dbus yet")
-	}
 
 	if track != nil {
 		metadata := types.Metadata{
@@ -384,8 +385,13 @@ func setPlayerMetadata(track *itunes.IiTrack, state *State) error {
 			val, exists := state.artworkCache.store.Get(track.TrackID)
 			if exists {
 				metadata.ArtUrl = val
+				ensureValidTrackID(&metadata)
 				*state.currentMetadata = metadata
 				log.Debug("will send cached artwork from weak map", track.TrackID, val)
+				if state.server.Conn == nil {
+					log.Debug("dbus server connection is not ready yet")
+					return nil
+				}
 				return state.mprisHandler.Player.OnTitle()
 			}
 
@@ -411,24 +417,29 @@ func setPlayerMetadata(track *itunes.IiTrack, state *State) error {
 			artUrl := "file://" + unixFilename
 			state.artworkCache.store.Set(track.TrackID, artUrl)
 
-			state.currentMetadata.ArtUrl = artUrl
+			metadata.ArtUrl = artUrl
+			ensureValidTrackID(&metadata)
 			*state.currentMetadata = metadata
+			if state.server.Conn == nil {
+				log.Debug("dbus server connection is not ready yet")
+				return nil
+			}
 			return state.mprisHandler.Player.OnTitle()
 		}
 		return fmt.Errorf("track.Dispatcher is nil")
 	}
 
 	// send only the bogus trackid if we don't have anything to begin with (stops godbus/dbus from spamming the console)
-	state.currentMetadata = &types.Metadata{
+	metadata := &types.Metadata{
 		TrackId: dbus.ObjectPath(BogusTrackID),
 	}
-	return state.mprisHandler.Player.OnTitle()
-}
-
-func setPosition(tunes *itunes.IiTunes, state *State) {
-	if tunes != nil {
-		state.currentPosition = milliToMicro(int64(tunes.PlayerPositionMS))
+	ensureValidTrackID(metadata)
+	state.currentMetadata = metadata
+	if state.server.Conn == nil {
+		log.Debug("dbus server connection is not ready yet")
+		return nil
 	}
+	return state.mprisHandler.Player.OnTitle()
 }
 
 func secondsToMicro(seconds int64) int64 {
@@ -516,7 +527,9 @@ func (state *State) startTicker() {
 						position := time.Duration(tunes.PlayerPositionMS) * time.Millisecond
 						state.currentPosition = position.Microseconds()
 
-						state.mprisHandler.Player.OnAll()
+						state.mprisHandler.Player.OnTitle()
+						state.mprisHandler.Player.OnOptions()
+						state.mprisHandler.Player.OnPosition()
 					}
 				}
 			}
@@ -540,7 +553,7 @@ func main() {
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 
 	state := &State{
-		ticker:          time.NewTicker(200 * time.Millisecond),
+		ticker:          time.NewTicker(500 * time.Millisecond),
 		currentMetadata: &types.Metadata{},
 		artworkCache: WeakTrackArtworkCache{
 			store: weakmap.Map[int64, string]{},
@@ -558,6 +571,7 @@ func main() {
 		state.QuitSafely(err, "failed to initialize dispatcher")
 		return
 	}
+	state.tunesDispatcher = dispatcher
 	//defer state.QuitSafely(nil, "")
 
 	busRoot := BusRoot{
@@ -584,17 +598,15 @@ func main() {
 	}
 	setPlayerMetadata(nil, state)
 	StartServingBus(state.server)
+	go state.startTicker()
 
 	curr, err := itunes.GetCurrentTrack(dispatcher)
 	if state.server.Conn != nil {
-		if err != nil {
-			if curr.Dispatcher != nil {
+		if err == nil {
+			if curr != nil && curr.Dispatcher != nil {
 				log.Debug("current track", curr)
-	
-				if curr != nil {
-					setPlayerMetadata(curr, state)
-				}
-				
+
+				setPlayerMetadata(curr, state)
 				curr.Dispatcher.Release()
 			}
 		} else {
@@ -607,6 +619,8 @@ func main() {
 	if err != nil {
 		state.QuitSafely(err, "failed to listen for COM events")
 	}
+
+	log.Info("the end")
 }
 
 func (state *State) QuitSafely(err error, message string) {
@@ -636,5 +650,7 @@ func (state *State) QuitSafely(err error, message string) {
 	if state.tunesDispatcher != nil {
 		state.tunesDispatcher.Release()
 	}
-	state.quit <- struct{}{}
+	state.quitOnce.Do(func() {
+		close(state.quit)
+	})
 }
