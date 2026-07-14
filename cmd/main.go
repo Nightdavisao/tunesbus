@@ -363,6 +363,7 @@ func ensureValidTrackID(metadata *types.Metadata) {
 	}
 }
 
+// note that this is already releasing the track's dispatcher object, don't release it yourself after using this
 func setPlayerMetadata(track *itunes.IiTrack, state *State) error {
 	state.mux.Lock()
 	defer state.mux.Unlock()
@@ -607,7 +608,6 @@ func main() {
 				log.Debug("current track", curr)
 
 				setPlayerMetadata(curr, state)
-				curr.Dispatcher.Release()
 			}
 		} else {
 			log.Debug("failed to get current track, probably itunes doesn't have anything in the queue...")
