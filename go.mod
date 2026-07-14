@@ -9,6 +9,7 @@ require (
 )
 
 require (
+	github.com/ammario/weakmap v0.3.1-0.20240402193103-1887e5a51caf // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
 	github.com/charmbracelet/lipgloss v1.1.0 // indirect
@@ -28,3 +29,4 @@ require (
 )
 
 replace github.com/godbus/dbus/v5 => ../godbus-dbus
+replace github.com/quarckster/go-mpris-server => ../go-mpris-server

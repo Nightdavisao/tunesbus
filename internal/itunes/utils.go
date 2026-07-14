@@ -5,7 +5,6 @@ package itunes
 import (
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/charmbracelet/log"
 
@@ -150,7 +149,6 @@ func SaveArtworkIfAvaliable(trackDispatcher *ole.IDispatch, track *IiTrack) (dos
 
 		if err == nil {
 			// TODO: check if the file already exists
-			<-time.After(200 * time.Millisecond)
 			//os.Mkdir("C:\\Temp", 0755)
 			// :)
 			artworkPath = path.Join("C:\\", fmt.Sprintf("%d%s", track.TrackID, fileSuffix))

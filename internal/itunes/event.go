@@ -232,29 +232,21 @@ func (c *COMEventSink) ListenEvents(done chan struct{}) error {
 
 	var msg ole.Msg
 	for {
-		select {
-		case <-done:
-			log.Debug("received done msg on com event loop")
-			return nil
-		default:
-			if receiver.ref != 0 {
-				ret, err := ole.GetMessage(&msg, 0, 0, 0)
-				if err != nil {
-					log.Error("failed on ret", ret)
-					return nil
-				}
-				if ret == 0 {
-					log.Debug("ret is 0")
-					break
-				}
-				log.Debug("dispatching message")
-				ole.DispatchMessage(&msg)
+		if receiver.ref != 0 {
+			ret, err := ole.GetMessage(&msg, 0, 0, 0)
+			if err != nil {
+				return err
 			}
+			if ret == 0 {
+				break
+			}
+			ole.DispatchMessage(&msg)
+		}
 
-			if receiver.ref == -1 {
-				log.Warn("receiver.ref is -1...? we should probably quit.")
-				return errors.New("receiver.ref is -1")
-			}
+		if receiver.ref == -1 {
+			log.Warn("receiver.ref is -1...? we should probably quit.")
+			return errors.New("receiver.ref is -1")
 		}
 	}
+	return nil
 }
