@@ -5,16 +5,13 @@ package itunes
 import (
 	"errors"
 	"fmt"
-
+	"os"
+	"strings"
+	"sync"
 	"github.com/charmbracelet/log"
-
-	//"os"
 	"path"
 	"syscall"
 	"unsafe"
-
-	//"log"
-
 	"github.com/go-ole/go-ole"
 	"github.com/go-ole/go-ole/oleutil"
 )
@@ -39,8 +36,8 @@ func GetCurrentTrack(dispatcher *ole.IDispatch) (*IiTrack, error) {
 	return track, err
 }
 
-func getInt32Property(dispatcher *ole.IDispatch, property string) (int32, error) {
-	variant, err := oleutil.GetProperty(dispatcher, property)
+func getInt32Property(dispatcher *ole.IDispatch, property string, params ...any) (int32, error) {
+	variant, err := oleutil.GetProperty(dispatcher, property, params...)
 	if err != nil {
 		return 0, err
 	}
@@ -88,85 +85,104 @@ func GetCurrentTunes(dispatcher *ole.IDispatch) (*IiTunes, error) {
 	return tunes, nil
 }
 
-func SaveArtworkIfAvaliable(trackDispatcher *ole.IDispatch, track *IiTrack) (dosFilePath string, err error) {
-	artworkPath := ""
+var mu sync.Mutex
 
+func SaveArtworkIfAvaliable(trackDispatcher *ole.IDispatch, track *IiTrack) (dosFilePath string, err error) {
+	mu.Lock()
+	defer mu.Unlock()
+	
 	artworkCollection, err := oleutil.GetProperty(trackDispatcher, "Artwork")
 	if err != nil {
-		return artworkPath, err
+		return "", err
 	}
-	defer artworkCollection.Clear()
 
 	artworkCollectionDispatcher := artworkCollection.ToIDispatch()
 	if artworkCollectionDispatcher == nil {
+		return "", nil
+	}
+
+	count, err := getInt32Property(artworkCollectionDispatcher, "Count")
+	if err != nil {
+		return "", err
+	}
+
+	log.Debug("artwork count", count)
+
+	if count < 1 {
+		log.Debug("no artwork available", count)
+		return "", nil
+	}
+	
+	item, err := oleutil.GetProperty(
+		artworkCollectionDispatcher,
+		"Item",
+		1,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	itemDispatcher := item.ToIDispatch()
+	if itemDispatcher == nil {
+		return "", nil
+	}
+
+	artworkFormat, err := getInt32Property(itemDispatcher, "Format")
+	if err != nil {
+		return "", err
+	}
+
+	// 0 = Unknown, 1 = JPEG, 2 = PNG, 3 = BMP
+	fileSuffix := ""
+
+	switch artworkFormat {
+	case 1:
+		fileSuffix = ".jpg"
+	case 2:
+		fileSuffix = ".png"
+	case 3:
+		fileSuffix = ".bmp"
+	}
+
+	tmpDir := path.Join("Z:", "tmp", "tunesbus")
+	err = os.MkdirAll(tmpDir, 0755)
+	if err != nil {
+		return "", err
+	}
+
+	artworkPath := path.Join(tmpDir, fmt.Sprintf("tmp-%d%s", track.TrackID, fileSuffix))
+	log.Info("artwork path", artworkPath)
+	fileInfo, err := os.Stat(artworkPath)
+	
+	// LOL https://stackoverflow.com/questions/56803469/join-paths-with-backslash-separator-independent-of-the-underlying-os-with-the-st
+	if err != nil {
+		artworkPath = strings.ReplaceAll(artworkPath, "/", "\\")
+		log.Info("windows sep", artworkPath)
+		r, err := oleutil.CallMethod(
+			itemDispatcher,
+			"SaveArtworkToFile",
+			artworkPath,
+		)
+		defer r.Clear()
+		log.Info("successfully saved artwork", artworkPath)
+
+		if err != nil {
+			return "", err
+		}
 		return artworkPath, nil
 	}
+	// apparently you can't release/clear everything here....????
+	defer artworkCollectionDispatcher.Release()
+	defer artworkCollection.Clear()
+	// defer item.Clear()
+	// defer itemDispatcher.Release()
 
-	count, err := oleutil.GetProperty(artworkCollectionDispatcher, "Count")
-	if err != nil {
-		return artworkPath, err
+	if !fileInfo.IsDir() {
+		artworkPath = strings.ReplaceAll(artworkPath, "/", "\\")
+		log.Info("windows sep", artworkPath)
+		return artworkPath, nil
 	}
-	defer count.Clear()
-
-	log.Debug("artwork count: %d", count.Value())
-
-	if count.Value().(int32) > 0 {
-		item, err := oleutil.GetProperty(
-			artworkCollectionDispatcher,
-			"Item",
-			1,
-		)
-		if err != nil {
-			return artworkPath, err
-		}
-		defer item.Clear()
-
-		itemDispatcher := item.ToIDispatch()
-		if itemDispatcher == nil {
-			return artworkPath, nil
-		}
-
-		artworkFormat, err := oleutil.GetProperty(itemDispatcher, "Format")
-		if err != nil {
-			return artworkPath, err
-		}
-		defer artworkFormat.Clear()
-
-		// 0 = Unknown, 1 = JPEG, 2 = PNG, 3 = BMP
-		fileSuffix := ""
-
-		switch artworkFormat.Value().(int32) {
-		case 1:
-			fileSuffix = ".jpg"
-		case 2:
-			fileSuffix = ".png"
-		case 3:
-			fileSuffix = ".bmp"
-		}
-
-		//tmpDir, err := os.MkdirTemp("", "tunesbus")
-		//log.Printf("dir temp is %s", tmpDir)
-
-		if err == nil {
-			// TODO: check if the file already exists
-			//os.Mkdir("C:\\Temp", 0755)
-			// :)
-			artworkPath = path.Join("C:\\", fmt.Sprintf("%d%s", track.TrackID, fileSuffix))
-			log.Debug("successfully saved artwork", artworkPath)
-
-			r, err := oleutil.CallMethod(
-				itemDispatcher,
-				"SaveArtworkToFile",
-				artworkPath,
-			)
-			if err != nil {
-				return "", err
-			}
-			defer r.Clear()
-			log.Debug("result for artwork", r)
-		}
-	}
-	return artworkPath, err
+	return "", errors.New("artworkPath is a directory instead of a file...?")
 }
 
 func SetTunesPosition(dispatcher *ole.IDispatch, seconds int64) (err error) {
