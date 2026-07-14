@@ -126,7 +126,7 @@ func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GU
 	return ole.S_OK
 }
 
-func connectObject(disp *ole.IDispatch, iid *ole.GUID, idisp any) (cookie uint32, err error) {
+func connectObject(disp *ole.IDispatch, iid *ole.GUID, idisp any) (point *ole.IConnectionPoint, cookie uint32, err error) {
 	unknown, err := disp.QueryInterface(ole.IID_IConnectionPointContainer)
 	if err != nil {
 		log.Fatalf("failed to query for interface while connecting to the object: %v", err)
@@ -137,7 +137,7 @@ func connectObject(disp *ole.IDispatch, iid *ole.GUID, idisp any) (cookie uint32
 	log.Debug("got the connection point container")
 	defer container.Release()
 
-	var point *ole.IConnectionPoint
+	point = nil
 	err = container.FindConnectionPoint(iid, &point)
 	if err != nil {
 		log.Fatalf("find connection point failed: %v", err)
@@ -147,15 +147,18 @@ func connectObject(disp *ole.IDispatch, iid *ole.GUID, idisp any) (cookie uint32
 		cookie, err = point.Advise(edisp)
 		if err != nil {
 			log.Fatalf("advise failed: %v", err)
-			return cookie, ole.NewError(ole.E_INVALIDARG)
+			point.Release()
+			return nil, cookie, ole.NewError(ole.E_INVALIDARG)
 		}
 	}
-	return cookie, nil
+	return point, cookie, nil
 }
 
 type COMEventSink struct {
 	dispatcher      *ole.IDispatch
 	callbackHandler COMEventCallback
+	connectionPoint *ole.IConnectionPoint
+	cookie          uint32
 }
 
 func NewCOMEventSink(dispatcher *ole.IDispatch, handler TunesEventHandler) (*COMEventSink, error) {
@@ -176,9 +179,24 @@ func NewTunesDispatch() (*ole.IDispatch, error) {
 		log.Fatalf("failed to create object: %v", err)
 		return nil, err
 	}
+	defer unknown.Release()
 
 	iTunesDispatch, err := unknown.QueryInterface(ole.IID_IDispatch)
 	return iTunesDispatch, err
+}
+
+func (c *COMEventSink) disconnectObject() {
+	if c.connectionPoint == nil {
+		return
+	}
+	if c.cookie != 0 {
+		if err := c.connectionPoint.Unadvise(c.cookie); err != nil {
+			log.Error("failed to unadvise event sink", err)
+		}
+		c.cookie = 0
+	}
+	c.connectionPoint.Release()
+	c.connectionPoint = nil
 }
 
 func (c *COMEventSink) ListenEvents(done chan struct{}) error {
@@ -205,11 +223,12 @@ func (c *COMEventSink) ListenEvents(done chan struct{}) error {
 		host: c.dispatcher,
 	}
 
-	_, err = connectObject(c.dispatcher, iid, (*ole.IUnknown)(unsafe.Pointer(receiver)))
+	c.connectionPoint, c.cookie, err = connectObject(c.dispatcher, iid, (*ole.IUnknown)(unsafe.Pointer(receiver)))
 	if err != nil {
 		log.Error("failed to connect the eventReceiver object", err)
 		return err
 	}
+	defer c.disconnectObject()
 
 	var msg ole.Msg
 	for {

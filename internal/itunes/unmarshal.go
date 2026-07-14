@@ -26,6 +26,7 @@ func unmarshalCOM(disp *ole.IDispatch, dst any) error {
 			if fv.Type() != reflect.TypeOf(disp) {
 				return fmt.Errorf("field %q tagged com:\"self\" must be *ole.IDispatch", field.Name)
 			}
+			disp.AddRef()
 			fv.Set(reflect.ValueOf(disp))
 			continue
 		}

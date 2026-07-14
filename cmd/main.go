@@ -198,13 +198,14 @@ func (m *Player) Shuffle() (bool, error) {
 		log.Debug("no playlist yet")
 		return false, nil
 	}
+	defer playlistDispatcher.Release()
 
 	shuffleStatus, err := oleutil.GetProperty(playlistDispatcher, "Shuffle")
-	log.Debug("shuffle status", shuffleStatus)
 	if err != nil {
 		log.Error("failed to get shuffle status", err)
 		return false, err
 	}
+	defer shuffleStatus.Clear()
 	return shuffleStatus.Value().(bool), nil
 }
 
@@ -219,6 +220,7 @@ func (m *Player) SetShuffle(shuffle bool) error {
 		log.Debug("no playlist yet")
 		return nil
 	}
+	defer playlistDispatcher.Release()
 
 	_, err = oleutil.PutProperty(playlistDispatcher, "Shuffle", shuffle)
 	if err != nil {
@@ -240,11 +242,13 @@ func (m *Player) LoopStatus() (types.LoopStatus, error) {
 		log.Debug("no playlist yet")
 		return types.LoopStatusNone, nil
 	}
+	defer playlistDispatcher.Release()
 
 	v, err := oleutil.GetProperty(playlistDispatcher, "SongRepeat")
 	if err != nil {
 		return types.LoopStatusNone, err
 	}
+	defer v.Clear()
 	log.Debug("loop status", v)
 
 	// ITPlayerRepeatMode: 0 = Off, 1 = One (repeat song), 2 = All (repeat playlist)
@@ -264,6 +268,11 @@ func (m *Player) SetLoopStatus(status types.LoopStatus) error {
 		log.Error("failed to get current playlist on setting Loop", err)
 		return err
 	}
+	if playlistDispatcher == nil {
+		log.Debug("no playlist yet")
+		return nil
+	}
+	defer playlistDispatcher.Release()
 
 	var mode int32
 	switch status {
@@ -313,6 +322,7 @@ func setInitialMetadata(track *itunes.IiTrack, state *State, afterSetting fn) {
 		}
 		if track.Dispatcher != nil {
 			go func(state *State, track *itunes.IiTrack, afterSetting fn) {
+				defer track.Dispatcher.Release()
 				dosFilename, err := itunes.SaveArtworkIfAvaliable(track.Dispatcher, track)
 				if err != nil {
 					log.Printf("failed to retrieve artwork for current track: %v", err)
@@ -383,7 +393,6 @@ func (m *eventHandler) OnPlayerStopEvent(t *itunes.IiTrack) {
 	setInitialMetadata(t, m.state, func() {
 		m.handler.Player.OnPlayback()
 		m.handler.Player.OnPlayPause()
-		//t.Dispatcher.Release()
 	})
 }
 
@@ -391,7 +400,6 @@ func (m *eventHandler) OnPlayerPlayingTrackChangedEvent(t *itunes.IiTrack) {
 	log.Printf("OnPlayerPlayingTrackChangedEvent: %v", t)
 	setInitialMetadata(t, m.state, func() {
 		m.handler.Player.OnPlayback()
-		//t.Dispatcher.Release()
 	})
 }
 
@@ -411,7 +419,6 @@ func (m *eventHandler) OnAboutToPromptUserToQuitEvent() {
 
 func (m *eventHandler) OnSoundVolumeChangedEvent(val *int64) {
 	log.Debug("received OnSoundVolumeChangedEvent", *val)
-	<-time.After(2 * time.Second) // we can't really tell if this was from mpris or itunes itself, so we'll be debouncing the emit change
 	m.state.currentVolume = *val
 	m.handler.Player.OnVolume()
 }

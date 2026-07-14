@@ -24,10 +24,34 @@ func GetCurrentTrack(dispatcher *ole.IDispatch) (*IiTrack, error) {
 	if dispatcher == nil {
 		return nil, errors.New("dispatcher is not ready")
 	}
-	
+
 	trackProp, err := oleutil.GetProperty(dispatcher, "CurrentTrack")
-	track, err := getCOMObjectFromVariant[IiTrack](trackProp, IID_IiTrack)
+	if err != nil {
+		return nil, err
+	}
+	defer trackProp.Clear()
+
+	trackDispatcher := trackProp.ToIDispatch()
+	if trackDispatcher == nil {
+		return nil, nil
+	}
+
+	track, err := getCOMObject[IiTrack](trackDispatcher, IID_IiTrack)
 	return track, err
+}
+
+func getInt32Property(dispatcher *ole.IDispatch, property string) (int32, error) {
+	variant, err := oleutil.GetProperty(dispatcher, property)
+	if err != nil {
+		return 0, err
+	}
+	defer variant.Clear()
+
+	v, ok := variant.Value().(int32)
+	if !ok {
+		return 0, fmt.Errorf("property %q did not return int32", property)
+	}
+	return v, nil
 }
 
 func GetCurrentTunes(dispatcher *ole.IDispatch) (*IiTunes, error) {
@@ -35,29 +59,25 @@ func GetCurrentTunes(dispatcher *ole.IDispatch) (*IiTunes, error) {
 		return nil, errors.New("dispatcher is not ready")
 	}
 
-	soundVolumeVar, err := oleutil.GetProperty(dispatcher, "SoundVolume")
+	soundVolume, err := getInt32Property(dispatcher, "SoundVolume")
 	if err != nil {
 		return nil, err
 	}
-	soundVolume := soundVolumeVar.Value().(int32)
 
-	playerPositionVar, err := oleutil.GetProperty(dispatcher, "PlayerPosition")
+	playerPosition, err := getInt32Property(dispatcher, "PlayerPosition")
 	if err != nil {
 		return nil, err
 	}
-	playerPosition := playerPositionVar.Value().(int32)
 
-	playerPositionMSVar, err := oleutil.GetProperty(dispatcher, "PlayerPositionMS")
+	playerPositionMS, err := getInt32Property(dispatcher, "PlayerPositionMS")
 	if err != nil {
 		return nil, err
 	}
-	playerPositionMS := playerPositionMSVar.Value().(int32)
 
-	playerStateVar, err := oleutil.GetProperty(dispatcher, "PlayerState")
+	playerState, err := getInt32Property(dispatcher, "PlayerState")
 	if err != nil {
 		return nil, err
 	}
-	playerState := playerStateVar.Value().(int32)
 
 	tunes := &IiTunes{
 		SoundVolume:      soundVolume,
@@ -66,7 +86,7 @@ func GetCurrentTunes(dispatcher *ole.IDispatch) (*IiTunes, error) {
 		PlayerState:      playerState,
 	}
 
-	return tunes, err
+	return tunes, nil
 }
 
 func SaveArtworkIfAvaliable(trackDispatcher *ole.IDispatch, track *IiTrack) (dosFilePath string, err error) {
@@ -76,23 +96,43 @@ func SaveArtworkIfAvaliable(trackDispatcher *ole.IDispatch, track *IiTrack) (dos
 	if err != nil {
 		return artworkPath, err
 	}
-	count, err := oleutil.GetProperty(artworkCollection.ToIDispatch(), "Count")
+	defer artworkCollection.Clear()
+
+	artworkCollectionDispatcher := artworkCollection.ToIDispatch()
+	if artworkCollectionDispatcher == nil {
+		return artworkPath, nil
+	}
+
+	count, err := oleutil.GetProperty(artworkCollectionDispatcher, "Count")
 	if err != nil {
 		return artworkPath, err
 	}
+	defer count.Clear()
+
 	log.Debug("artwork count: %d", count.Value())
 
 	if count.Value().(int32) > 0 {
 		item, err := oleutil.GetProperty(
-			artworkCollection.ToIDispatch(),
+			artworkCollectionDispatcher,
 			"Item",
 			1,
 		)
 		if err != nil {
 			return artworkPath, err
 		}
+		defer item.Clear()
 
-		artworkFormat, err := oleutil.GetProperty(item.ToIDispatch(), "Format")
+		itemDispatcher := item.ToIDispatch()
+		if itemDispatcher == nil {
+			return artworkPath, nil
+		}
+
+		artworkFormat, err := oleutil.GetProperty(itemDispatcher, "Format")
+		if err != nil {
+			return artworkPath, err
+		}
+		defer artworkFormat.Clear()
+
 		// 0 = Unknown, 1 = JPEG, 2 = PNG, 3 = BMP
 		fileSuffix := ""
 
@@ -116,15 +156,15 @@ func SaveArtworkIfAvaliable(trackDispatcher *ole.IDispatch, track *IiTrack) (dos
 			artworkPath = path.Join("C:\\", fmt.Sprintf("%d%s", track.TrackID, fileSuffix))
 			log.Debug("successfully saved artwork", artworkPath)
 
-			artwork := item.ToIDispatch()
 			r, err := oleutil.CallMethod(
-				artwork,
+				itemDispatcher,
 				"SaveArtworkToFile",
 				artworkPath,
 			)
 			if err != nil {
 				return "", err
 			}
+			defer r.Clear()
 			log.Debug("result for artwork", r)
 		}
 	}
@@ -136,11 +176,6 @@ func SetTunesPosition(dispatcher *ole.IDispatch, seconds int64) (err error) {
 	// HRESULT _stdcall PlayerPosition([in] long rhs);
 	const PlayerPositionDispId = 0x60020021
 	const DISPATCH_PROPERTYPUT = 0x4
-	const DISPID_PROPERTYPUT = -3
-
-	value := ole.VARIANT{}
-	value.VT = ole.VT_R8
-	value.Val = seconds
 
 	_, err = dispatcher.Invoke(PlayerPositionDispId, DISPATCH_PROPERTYPUT, float64(seconds))
 	return err
@@ -171,6 +206,7 @@ func GetPlayerButtonsState(dispatcher *ole.IDispatch) (prevEnabled bool, state i
 	}
 
 	var result ole.VARIANT
+	defer result.Clear()
 	var excep ole.EXCEPINFO
 	var argErr uint32
 
@@ -200,19 +236,28 @@ func GetPlayerButtonsState(dispatcher *ole.IDispatch) (prevEnabled bool, state i
 
 func SafeGetCurrentPlaylist(tunesDispatcher *ole.IDispatch) (*ole.IDispatch, error) {
 	// safety check
-	_, err := GetCurrentTrack(tunesDispatcher)
+	track, err := GetCurrentTrack(tunesDispatcher)
 	if err != nil {
 		return nil, nil
 	}
-	
+	if track == nil {
+		return nil, nil
+	}
+	if track.Dispatcher != nil {
+		track.Dispatcher.Release()
+	}
+
 	currentPlaylist, err := oleutil.GetProperty(tunesDispatcher, "CurrentPlaylist")
 	if err != nil {
 		log.Error("failed to get current playlist", currentPlaylist)
 		return nil, err
 	}
+	defer currentPlaylist.Clear()
+
 	playlistDispatcher := currentPlaylist.ToIDispatch()
 
 	if playlistDispatcher != nil {
+		playlistDispatcher.AddRef()
 		return playlistDispatcher, nil
 	}
 	return nil, nil
