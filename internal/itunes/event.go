@@ -6,7 +6,6 @@ import (
 	"errors"
 
 	"github.com/charmbracelet/log"
-	//"runtime"
 	"syscall"
 	"unsafe"
 
@@ -86,8 +85,7 @@ func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GU
 		if dp.cArgs == 0 {
 			return nil
 		}
-		first := (*ole.VARIANT)(unsafe.Pointer(dp.rgvarg))
-		//log.Printf("first argument: %s", first)
+		first := (*ole.VARIANT)(*(*unsafe.Pointer)(unsafe.Pointer(&dp.rgvarg)))
 		track, err := getCOMObjectFromVariant[IiTrack](first, IID_IiTrack)
 		if err != nil {
 			return nil
@@ -99,7 +97,7 @@ func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GU
 		if dp.cArgs == 0 {
 			return nil
 		}
-		first := (*ole.VARIANT)(unsafe.Pointer(dp.rgvarg))
+		first := (*ole.VARIANT)(*(*unsafe.Pointer)(unsafe.Pointer(&dp.rgvarg)))
 		switch first.VT {
 		case ole.VT_I4, ole.VT_I8, ole.VT_INT:
 			return &first.Val
@@ -128,12 +126,14 @@ func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GU
 
 func connectObject(disp *ole.IDispatch, iid *ole.GUID, idisp any) (point *ole.IConnectionPoint, cookie uint32, err error) {
 	unknown, err := disp.QueryInterface(ole.IID_IConnectionPointContainer)
+	unknown.AddRef()
 	if err != nil {
 		log.Fatalf("failed to query for interface while connecting to the object: %v", err)
 		return
 	}
 
 	container := (*ole.IConnectionPointContainer)(unsafe.Pointer(unknown))
+	container.AddRef()
 	log.Debug("got the connection point container")
 	defer container.Release()
 
@@ -143,6 +143,8 @@ func connectObject(disp *ole.IDispatch, iid *ole.GUID, idisp any) (point *ole.IC
 		log.Fatalf("find connection point failed: %v", err)
 		return
 	}
+	point.AddRef()
+	
 	if edisp, ok := idisp.(*ole.IUnknown); ok {
 		cookie, err = point.Advise(edisp)
 		if err != nil {
@@ -173,7 +175,6 @@ func NewCOMEventSink(dispatcher *ole.IDispatch, handler TunesEventHandler) (*COM
 func NewTunesDispatch() (*ole.IDispatch, error) {
 	// https://learn.microsoft.com/en-us/windows/win32/api/objbase/ne-objbase-coinit
 	ole.CoInitializeEx(uintptr(0), ole.COINIT_MULTITHREADED | ole.COINIT_SPEED_OVER_MEMORY)
-	//defer ole.CoUninitialize()
 
 	unknown, err := oleutil.CreateObject(TunesProgramID)
 	if err != nil {

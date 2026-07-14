@@ -26,8 +26,6 @@ import (
 	"github.com/quarckster/go-mpris-server/pkg/types"
 )
 
-const BogusTrackID = "/org/mpris/MediaPlayer2/Track/0"
-
 type BusRoot struct {
 	state *State
 }
@@ -152,7 +150,13 @@ func (m *BusPlayer) SetRate(rate float64) error {
 
 func (m *BusPlayer) Metadata() (types.Metadata, error) {
 	log.Debug("Metadata called", *m.state.currentMetadata)
-	return *m.state.currentMetadata, nil
+	if m.state.currentMetadata != nil {
+		return *m.state.currentMetadata, nil
+	}
+	return types.Metadata{
+		TrackId: dbus.ObjectPath("/org/mpris/MediaPlayer2/Track/1"),
+		Title: "Nothing playing",
+	}, nil
 }
 
 func (m *BusPlayer) Volume() (float64, error) {
@@ -365,11 +369,7 @@ type tunesEventHandler struct {
 
 type fn func()
 
-func ensureValidTrackID(metadata *types.Metadata) {
-	if metadata.TrackId == "" {
-		metadata.TrackId = dbus.ObjectPath(BogusTrackID)
-	}
-}
+
 
 // note that this is already releasing the track's dispatcher object, don't release it yourself after using this
 func setPlayerMetadata(track *itunes.IiTrack, state *State) error {
@@ -378,13 +378,13 @@ func setPlayerMetadata(track *itunes.IiTrack, state *State) error {
 
 	if track != nil {
 		metadata := types.Metadata{
-			TrackId:     dbus.ObjectPath(fmt.Sprintf("/org/mpris/MediaPlayer2/Track/%d", track.TrackID)),
 			Album:       track.Album,
 			Title:       track.Name,
 			Artist:      []string{track.Artist},
 			Length:      types.Microseconds(secondsToMicro(track.Duration)),
 			DiscNumber:  int(track.DiscNumber),
 			TrackNumber: int(track.TrackNumber),
+			TrackId:     dbus.ObjectPath(fmt.Sprintf("/org/mpris/MediaPlayer2/Track/%d", track.TrackID)),
 		}
 		if track.Dispatcher != nil {
 			log.Debug("partial new metadata (not sent yet)", state.currentMetadata)
@@ -394,7 +394,6 @@ func setPlayerMetadata(track *itunes.IiTrack, state *State) error {
 			val, exists := state.artworkCache.store.Get(track.TrackID)
 			if exists {
 				metadata.ArtUrl = val
-				ensureValidTrackID(&metadata)
 				*state.currentMetadata = metadata
 				log.Debug("will send cached artwork from weak map", track.TrackID, val)
 				if state.server.Conn == nil {
@@ -427,7 +426,6 @@ func setPlayerMetadata(track *itunes.IiTrack, state *State) error {
 			state.artworkCache.store.Set(track.TrackID, artUrl)
 
 			metadata.ArtUrl = artUrl
-			ensureValidTrackID(&metadata)
 			*state.currentMetadata = metadata
 			if state.server.Conn == nil {
 				log.Debug("dbus server connection is not ready yet")
@@ -439,11 +437,6 @@ func setPlayerMetadata(track *itunes.IiTrack, state *State) error {
 	}
 
 	// send only the bogus trackid if we don't have anything to begin with (stops godbus/dbus from spamming the console)
-	metadata := &types.Metadata{
-		TrackId: dbus.ObjectPath(BogusTrackID),
-	}
-	ensureValidTrackID(metadata)
-	state.currentMetadata = metadata
 	if state.server.Conn == nil {
 		log.Debug("dbus server connection is not ready yet")
 		return nil
@@ -513,13 +506,12 @@ func (m *tunesEventHandler) OnSoundVolumeChangedEvent(val *int64) {
 	m.handler.Player.OnVolume()
 }
 
-func StartServingBus(s *server.Server) {
+func (state *State) startServingBus(s *server.Server) {
 	log.Info("starting MPRIS server...")
 	err := s.Listen()
 
 	if err != nil {
-		log.Error("startMprisServer failed, quitting", err)
-		return
+		state.QuitSafely(err, "startMprisServer failed, quitting")
 	}
 }
 
@@ -531,7 +523,7 @@ func (state *State) startTicker() {
 		case <-state.ticker.C:
 			if state.tunesDispatcher != nil {
 				tunes, _ := itunes.GetCurrentTunes(state.tunesDispatcher)
-				if tunes != nil {
+				if tunes != nil && state.currentMetadata != nil {
 					if tunes.PlayerPositionMS > 0 {
 						position := time.Duration(tunes.PlayerPositionMS) * time.Millisecond
 						state.currentPosition = position.Microseconds()
@@ -583,7 +575,6 @@ func main() {
 		return
 	}
 	state.tunesDispatcher = dispatcher
-	//defer state.QuitSafely(nil, "")
 
 	busRoot := BusRoot{
 		state: state,
@@ -607,8 +598,7 @@ func main() {
 	if err != nil {
 		state.QuitSafely(err, "something failed when setting up the event sink")
 	}
-	setPlayerMetadata(nil, state)
-	StartServingBus(state.server)
+	go state.startServingBus(state.server)
 	go state.startTicker()
 
 	curr, err := itunes.GetCurrentTrack(dispatcher)

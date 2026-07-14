@@ -36,11 +36,11 @@ func GetUnixFilename(dosFilename string) (string, error) {
 func cStringToGo(ptr uintptr) string {
     var buf []byte
     for {
-        b := *(*byte)(unsafe.Pointer(ptr))
-        if b == 0 {
+        b := (*byte)(*(*unsafe.Pointer)(unsafe.Pointer(&ptr)))
+        if *b == 0 {
             break
         }
-        buf = append(buf, b)
+        buf = append(buf, *b)
         ptr++
     }
     return string(buf)
