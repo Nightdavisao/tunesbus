@@ -449,6 +449,7 @@ func (m *tunesEventHandler) OnPlayerPlayEvent(t *itunes.IiTrack) {
 		return
 	}
 	m.handler.Player.OnPlayPause()
+	m.handler.Player.OnPlayback()
 }
 
 func (m *tunesEventHandler) OnPlayerStopEvent(t *itunes.IiTrack) {
@@ -459,6 +460,7 @@ func (m *tunesEventHandler) OnPlayerStopEvent(t *itunes.IiTrack) {
 		return
 	}
 	m.handler.Player.OnPlayPause()
+	m.handler.Player.OnPlayback()
 	m.handler.Player.OnEnded()
 }
 
@@ -470,6 +472,8 @@ func (m *tunesEventHandler) OnPlayerPlayingTrackChangedEvent(t *itunes.IiTrack) 
 		return
 	}
 	m.handler.Player.OnPlayPause()
+	m.handler.Player.OnPlayback()
+	m.handler.Player.OnTitle()
 }
 
 func (m *tunesEventHandler) OnQuittingEvent() {
