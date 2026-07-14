@@ -461,6 +461,9 @@ func (m *tunesEventHandler) OnPlayerPlayEvent(t *itunes.IiTrack) {
 		log.Error("failed to set initial metadata", err)
 		return
 	}
+	if m.state.server.Conn == nil {
+		go m.state.startServingBus(m.state.server)	
+	}
 	m.handler.Player.OnPlayPause()
 	m.handler.Player.OnPlayback()
 }
@@ -598,7 +601,6 @@ func main() {
 	if err != nil {
 		state.QuitSafely(err, "something failed when setting up the event sink")
 	}
-	go state.startServingBus(state.server)
 	go state.startTicker()
 
 	curr, err := itunes.GetCurrentTrack(dispatcher)
