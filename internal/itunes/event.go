@@ -171,7 +171,8 @@ func NewCOMEventSink(dispatcher *ole.IDispatch, handler TunesEventHandler) (*COM
 }
 
 func NewTunesDispatch() (*ole.IDispatch, error) {
-	ole.CoInitializeEx(0, 0)
+	// https://learn.microsoft.com/en-us/windows/win32/api/objbase/ne-objbase-coinit
+	ole.CoInitializeEx(uintptr(0), ole.COINIT_MULTITHREADED | ole.COINIT_SPEED_OVER_MEMORY)
 	//defer ole.CoUninitialize()
 
 	unknown, err := oleutil.CreateObject(TunesProgramID)

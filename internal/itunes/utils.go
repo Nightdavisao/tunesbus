@@ -31,6 +31,7 @@ func GetCurrentTrack(dispatcher *ole.IDispatch) (*IiTrack, error) {
 	if trackDispatcher == nil {
 		return nil, nil
 	}
+	trackDispatcher.AddRef()
 
 	track, err := getCOMObject[IiTrack](trackDispatcher, IID_IiTrack)
 	return track, err
@@ -92,6 +93,7 @@ func SaveArtworkIfAvaliable(trackDispatcher *ole.IDispatch, track *IiTrack) (dos
 	defer mu.Unlock()
 	
 	artworkCollection, err := oleutil.GetProperty(trackDispatcher, "Artwork")
+	defer artworkCollection.Clear()
 	if err != nil {
 		return "", err
 	}
@@ -100,6 +102,8 @@ func SaveArtworkIfAvaliable(trackDispatcher *ole.IDispatch, track *IiTrack) (dos
 	if artworkCollectionDispatcher == nil {
 		return "", nil
 	}
+	artworkCollectionDispatcher.AddRef()
+	defer artworkCollectionDispatcher.Release()
 
 	count, err := getInt32Property(artworkCollectionDispatcher, "Count")
 	if err != nil {
@@ -118,6 +122,8 @@ func SaveArtworkIfAvaliable(trackDispatcher *ole.IDispatch, track *IiTrack) (dos
 		"Item",
 		1,
 	)
+	defer item.Clear()
+	
 	if err != nil {
 		return "", err
 	}
@@ -126,6 +132,8 @@ func SaveArtworkIfAvaliable(trackDispatcher *ole.IDispatch, track *IiTrack) (dos
 	if itemDispatcher == nil {
 		return "", nil
 	}
+	itemDispatcher.AddRef()
+	defer itemDispatcher.Release()
 
 	artworkFormat, err := getInt32Property(itemDispatcher, "Format")
 	if err != nil {
@@ -171,11 +179,6 @@ func SaveArtworkIfAvaliable(trackDispatcher *ole.IDispatch, track *IiTrack) (dos
 		}
 		return artworkPath, nil
 	}
-	// apparently you can't release/clear everything here....????
-	defer artworkCollectionDispatcher.Release()
-	defer artworkCollection.Clear()
-	// defer item.Clear()
-	// defer itemDispatcher.Release()
 
 	if !fileInfo.IsDir() {
 		artworkPath = strings.ReplaceAll(artworkPath, "/", "\\")
@@ -271,6 +274,9 @@ func SafeGetCurrentPlaylist(tunesDispatcher *ole.IDispatch) (*ole.IDispatch, err
 	playlistDispatcher := currentPlaylist.ToIDispatch()
 
 	if playlistDispatcher != nil {
+		// Increments the reference count for an interface pointer to a COM object. 
+		// You should call this method whenever you make a copy of an interface pointer
+		// https://learn.microsoft.com/en-us/windows/win32/api/unknwn/nf-unknwn-iunknown-addref
 		playlistDispatcher.AddRef()
 		return playlistDispatcher, nil
 	}
