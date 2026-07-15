@@ -3,6 +3,7 @@ An experimental MPRIS integration for iTunes (running on Wine)
 
 [Main repository](https://codeberg.org/Nightdavisao/tunesbus)  
 [Releases](https://codeberg.org/Nightdavisao/tunesbus/releases)  
+Pull requests are disabled on the GitHub mirror. I'm lazy to set up something to pull commits from it and this kinda demotivates the average slop machine to "contribute" to this project, anyway. 
 
 ## How to run
 First, open iTunes. Then, open this program. This should be all.  
