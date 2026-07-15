@@ -1,6 +1,9 @@
 # tunesbus
 An experimental MPRIS integration for iTunes (running on Wine)
 
+[Main repository](https://codeberg.org/Nightdavisao/tunesbus)  
+[Releases](https://codeberg.org/Nightdavisao/tunesbus/releases)  
+
 ## How to run
 First, open iTunes. Then, open this program. This should be all.  
 You can also just open this program and it'll open iTunes anyway. That's just how Windows' OLE/COM works, I didn't write any code to do this. :)
