@@ -28,5 +28,5 @@ require (
 	golang.org/x/sys v0.30.0 // indirect
 )
 
-replace github.com/godbus/dbus/v5 => ../godbus-dbus
-replace github.com/quarckster/go-mpris-server => ../go-mpris-server
+replace github.com/godbus/dbus/v5 => ./godbus-dbus
+replace github.com/quarckster/go-mpris-server => ./go-mpris-server

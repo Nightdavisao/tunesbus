@@ -1,0 +1,8 @@
+[submodule "godbus-dbus"]
+	path = godbus-dbus
+	url = https://github.com/Nightdavisao/godbus-dbus
+	branch = wine-workarounds
+[submodule "go-mpris-server"]
+	path = go-mpris-server
+	url = https://github.com/Nightdavisao/go-mpris-server
+	branch = implement-position-emit
