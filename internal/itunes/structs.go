@@ -12,7 +12,7 @@ type TunesEventHandler interface {
 }
 
 type IiTrack struct {
-	Dispatcher *ole.IDispatch `com:"self"`
+	IDispatch *ole.IDispatch `com:"self"`
 	Name string
 	Artist string
 	Album string
@@ -23,9 +23,35 @@ type IiTrack struct {
 	TrackID int64 `com:"trackID"`
 }
 
+type ArtworkFormat int32
+
+const (
+	Unknown ArtworkFormat = iota
+	JPEG
+	PNG
+	BMP
+)
+
+type ITPlayerState int32
+
+const (
+	ITPlayerStateStopped ITPlayerState = iota
+	ITPlayerStatePlaying
+	ITPlayerStateFastForward
+	ITPlayerStateRewind
+)
+
+type ITPlayerRepeatMode int32
+
+const (
+	ITPlayerRepeatModeNone ITPlayerRepeatMode = iota
+	ITPlayerRepeatModeOne
+	ITPlayerRepeatModeAll
+)
+
 // float = int64
 type IiTunes struct {
-	Dispatcher *ole.IDispatch `com:"self"`
+	IDispatch *ole.IDispatch `com:"self"`
 	CanSetShuffle bool
 	CanSetSongRepeat bool
 	//CurrentTrack IiTrack
@@ -33,13 +59,15 @@ type IiTunes struct {
 	// long _stdcall PlayerPosition();
 	// [id(0x60020021), propput, helpstring("Returns the player's position within the currently playing track in seconds.")]
 	// void _stdcall PlayerPosition([in] long rhs);
-	PlayerPosition int32 // can we set the position?
+	// Player position in seconds
+	PlayerPosition int32
+	// Player position in milliseconds
 	PlayerPositionMS int32
-	PlayerState int32
+	PlayerState ITPlayerState
 	SoundVolume int32
 	Rating int64
 	Time string
-	trackID int64
+	TrackID int64 `com:"trackID"`
 	// BackTrack, NextTrack, Resume, Play, PlayPause
 }
 

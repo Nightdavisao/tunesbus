@@ -4,10 +4,12 @@ package itunes
 
 import (
 	"errors"
+	"tunesbus/internal/olejunk"
 
-	"github.com/charmbracelet/log"
 	"syscall"
 	"unsafe"
+
+	"github.com/charmbracelet/log"
 
 	"github.com/go-ole/go-ole"
 	"github.com/go-ole/go-ole/oleutil"
@@ -86,7 +88,7 @@ func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GU
 			return nil
 		}
 		first := (*ole.VARIANT)(*(*unsafe.Pointer)(unsafe.Pointer(&dp.rgvarg)))
-		track, err := getCOMObjectFromVariant[IiTrack](first, IID_IiTrack)
+		track, err := olejunk.GetCOMObjectFromVariant[IiTrack](first, IID_IiTrack)
 		if err != nil {
 			return nil
 		}

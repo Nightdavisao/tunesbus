@@ -1,4 +1,4 @@
-package itunes
+package olejunk
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	"github.com/go-ole/go-ole/oleutil"
 )
 
-func unmarshalCOM(disp *ole.IDispatch, dst any) error {
+func UnmarshalCOM(disp *ole.IDispatch, dst any) error {
 	rv := reflect.ValueOf(dst)
 	if rv.Kind() != reflect.Pointer || rv.Elem().Kind() != reflect.Struct {
 		return fmt.Errorf("UnmarshalCOM: dst must be a pointer to a struct")
@@ -72,14 +72,14 @@ func assign(fv reflect.Value, variant *ole.VARIANT) error {
 	return fmt.Errorf("cannot assign COM value of type %s to field of type %s", val.Type(), fv.Type())
 }
 
-func getCOMObjectFromVariant[T any](object *ole.VARIANT, iid string) (*T, error) {
+func GetCOMObjectFromVariant[T any](object *ole.VARIANT, iid string) (*T, error) {
 	if object != nil {
-		return getCOMObject[T](object.ToIDispatch(), iid)
+		return GetCOMObject[T](object.ToIDispatch(), iid)
 	}
 	return nil, errors.New("object is nil")
 }
 
-func getCOMObject[T any](iDispatch *ole.IDispatch, iid string) (*T, error) {
+func GetCOMObject[T any](iDispatch *ole.IDispatch, iid string) (*T, error) {
 	if iDispatch == nil {
 		return nil, errors.New("iDispatch is nil")
 	}
@@ -92,10 +92,11 @@ func getCOMObject[T any](iDispatch *ole.IDispatch, iid string) (*T, error) {
 	disp, err := iDispatch.QueryInterface(guid); if err != nil {
 		return nil, fmt.Errorf("query interface %s: %w", iid, err)
 	}
+	disp.AddRef()
 	defer disp.Release()
 
 	var result T
-	if err := unmarshalCOM(disp, &result); err != nil {
+	if err := UnmarshalCOM(disp, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
