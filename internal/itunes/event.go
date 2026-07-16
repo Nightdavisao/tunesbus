@@ -159,15 +159,15 @@ func connectObject(disp *ole.IDispatch, iid *ole.GUID, idisp any) (point *ole.IC
 }
 
 type COMEventSink struct {
-	dispatcher      *ole.IDispatch
+	disp      *ole.IDispatch
 	callbackHandler COMEventCallback
 	connectionPoint *ole.IConnectionPoint
 	cookie          uint32
 }
 
-func NewCOMEventSink(dispatcher *ole.IDispatch, handler TunesEventHandler) (*COMEventSink, error) {
+func NewCOMEventSink(disp *ole.IDispatch, handler TunesEventHandler) (*COMEventSink, error) {
 	return &COMEventSink{
-		dispatcher: dispatcher,
+		disp: disp,
 		callbackHandler: COMEventCallback{
 			handler: handler,
 		},
@@ -224,10 +224,10 @@ func (c *COMEventSink) ListenEvents(done chan struct{}) error {
 			GetIDsOfNames:    syscall.NewCallback(getIDsOfNames),
 			Invoke:           syscall.NewCallback(c.callbackHandler.invoke),
 		},
-		host: c.dispatcher,
+		host: c.disp,
 	}
 
-	c.connectionPoint, c.cookie, err = connectObject(c.dispatcher, iid, (*ole.IUnknown)(unsafe.Pointer(receiver)))
+	c.connectionPoint, c.cookie, err = connectObject(c.disp, iid, (*ole.IUnknown)(unsafe.Pointer(receiver)))
 	if err != nil {
 		log.Error("failed to connect the eventReceiver object", err)
 		return err

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"syscall"
 	"tunesbus/internal/olejunk"
@@ -25,31 +24,41 @@ func GetCurrentTrack(disp *ole.IDispatch) (*IiTrack, error) {
 			return nil, err
 		}
 		defer trackProp.Clear()
-	
-		trackDispatcher := trackProp.ToIDispatch()
-		if trackDispatcher == nil {
+
+		trackDispatch := trackProp.ToIDispatch()
+		if trackDispatch == nil {
 			return nil, nil
 		}
-		trackDispatcher.AddRef()
-		defer trackDispatcher.Release()
-		
-		track, err := olejunk.GetCOMObject[IiTrack](trackDispatcher, IID_IiTrack)
+		trackDispatch.AddRef()
+		defer trackDispatch.Release()
+
+		track, err := olejunk.GetCOMObject[IiTrack](trackDispatch, IID_IiTrack)
 		return track, err
 	}
 	return nil, errors.New("disp is not ready")
 }
 
 func GetCurrentTunes(disp *ole.IDispatch) (*IiTunes, error) {
-	if disp != nil {
-		var result IiTunes
-		if err := olejunk.UnmarshalCOM(disp, &result); err != nil {
-			return nil, err
-		}
-	
-		return &result, nil
+	if disp == nil {
+		return nil, errors.New("disp is not ready")
 	}
-	return nil, errors.New("disp is not ready")
 
+	properties, err := olejunk.GetPropertiesFromIDispatch[int32](disp, []string{
+		"SoundVolume",
+		"PlayerPosition",
+		"PlayerPositionMS",
+		"PlayerState",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &IiTunes{
+		SoundVolume:      *properties["SoundVolume"],
+		PlayerPosition:   *properties["PlayerPosition"],
+		PlayerPositionMS: *properties["PlayerPositionMS"],
+		PlayerState:      ITPlayerState(*properties["PlayerState"]),
+	}, nil
 }
 
 var mu sync.Mutex
@@ -59,110 +68,93 @@ func SaveArtworkIfAvaliable(trackDisp *ole.IDispatch, track *IiTrack) (string, e
 	defer mu.Unlock()
 
 	artworkCollection, err := oleutil.GetProperty(trackDisp, "Artwork")
-	defer artworkCollection.Clear()
 	if err != nil {
-		artworkCollectionDispatcher := artworkCollection.ToIDispatch()
-		
-		if artworkCollectionDispatcher != nil {
-			artworkCollectionDispatcher.AddRef()
-			defer artworkCollectionDispatcher.Release()
-
-			count, err := olejunk.GetPropertyFromIDispatch[int32](artworkCollectionDispatcher, "Count")
-			if err != nil {
-				return "", err
-			}
-
-			log.Debug("artwork count", *count)
-
-			if *count < 1 {
-				log.Debug("no artwork available", count)
-				return "", nil
-			}
-
-			item, err := oleutil.GetProperty(
-				artworkCollectionDispatcher,
-				"Item",
-				1,
-			)
-			defer item.Clear()
-
-			if err != nil {
-				return "", err
-			}
-
-			itemDispatcher := item.ToIDispatch()
-			if itemDispatcher == nil {
-				return "", nil
-			}
-			itemDispatcher.AddRef()
-			defer itemDispatcher.Release()
-
-			artworkFormat, err := olejunk.GetPropertyFromIDispatch[ArtworkFormat](itemDispatcher, "Format")
-			if err != nil {
-				return "", err
-			}
-			
-			fileSuffix := ""
-
-			switch *artworkFormat {
-			case JPEG:
-				fileSuffix = ".jpg"
-			case PNG:
-				fileSuffix = ".png"
-			case BMP:
-				fileSuffix = ".bmp"
-			}
-
-			// LOL https://stackoverflow.com/questions/56803469/join-paths-with-backslash-separator-independent-of-the-underlying-os-with-the-st
-			tmpDir, err := wine.UnixTmpDirAsDosPath()
-			if err != nil {
-				return "", err
-			}
-			busTmpDir := wine.WindowsPathJoin(tmpDir, "tunesbus")
-			if err := os.MkdirAll(busTmpDir, 0o755); err != nil {
-				return "", err
-			}
-
-			artworkPath := wine.WindowsPathJoin(busTmpDir, fmt.Sprintf("tmp-%d%s", track.TrackID, fileSuffix))
-			log.Info("artwork path", artworkPath)
-			
-			fileInfo, err := os.Stat(artworkPath)
-
-			if err != nil {
-				r, err := oleutil.CallMethod(
-					itemDispatcher,
-					"SaveArtworkToFile",
-					artworkPath,
-				)
-				defer r.Clear()
-				log.Info("successfully saved artwork", artworkPath)
-
-				if err != nil {
-					return "", err
-				}
-				return artworkPath, nil
-			}
-
-			if !fileInfo.IsDir() {
-				artworkPath = strings.ReplaceAll(artworkPath, "/", "\\")
-				log.Info("windows sep", artworkPath)
-				return artworkPath, nil
-			}
-			return "", errors.New("artworkPath is a directory instead of a file...?")
-		}
+		return "", err
 	}
-	return "", nil
+	defer artworkCollection.Clear()
+
+	artworkCollectionDisp := artworkCollection.ToIDispatch()
+	if artworkCollectionDisp == nil {
+		return "", nil
+	}
+	artworkCollectionDisp.AddRef()
+	defer artworkCollectionDisp.Release()
+
+	count, err := olejunk.GetPropertyFromIDispatch[int32](artworkCollectionDisp, "Count")
+	if err != nil {
+		return "", err
+	}
+	if *count < 1 {
+		return "", nil
+	}
+
+	item, err := oleutil.GetProperty(artworkCollectionDisp, "Item", 1)
+	if err != nil {
+		return "", err
+	}
+	defer item.Clear()
+
+	itemDisp := item.ToIDispatch()
+	if itemDisp == nil {
+		return "", nil
+	}
+	itemDisp.AddRef()
+	defer itemDisp.Release()
+
+	artworkFormat, err := olejunk.GetPropertyFromIDispatch[ArtworkFormat](itemDisp, "Format")
+	if err != nil {
+		return "", err
+	}
+	fileSuffix := ""
+	switch *artworkFormat {
+	case JPEG:
+		fileSuffix = ".jpg"
+	case PNG:
+		fileSuffix = ".png"
+	case BMP:
+		fileSuffix = ".bmp"
+	}
+
+	tmpDir, err := wine.UnixTmpDirAsDosPath()
+	if err != nil {
+		return "", err
+	}
+	busTmpDir := wine.WindowsPathJoin(tmpDir, "tunesbus")
+	if err := os.MkdirAll(busTmpDir, 0o755); err != nil {
+		return "", err
+	}
+	artworkPath := wine.WindowsPathJoin(busTmpDir, fmt.Sprintf("tmp-%d%s", track.TrackID, fileSuffix))
+
+	fileInfo, statErr := os.Stat(artworkPath)
+	if statErr != nil {
+		if !os.IsNotExist(statErr) {
+			return "", statErr
+		}
+		r, err := oleutil.CallMethod(itemDisp, "SaveArtworkToFile", artworkPath)
+		if r != nil {
+			defer r.Clear()
+		}
+		if err != nil {
+			return "", err
+		}
+		log.Info("saved artwork", "path", artworkPath)
+		return artworkPath, nil
+	}
+	if fileInfo.IsDir() {
+		return "", fmt.Errorf("artwork path is a directory: %s", artworkPath)
+	}
+	return artworkPath, nil
 }
 
-func SetTunesPosition(dispatcher *ole.IDispatch, seconds int64) (err error) {
+func SetTunesPosition(disp *ole.IDispatch, seconds int64) (err error) {
 	// [id(0x60020021), propput, helpstring("Returns the player's position within the currently playing track in seconds.")]
 	// HRESULT _stdcall PlayerPosition([in] long rhs);
 	const PlayerPositionDispId = 0x60020021
-	_, err = dispatcher.Invoke(PlayerPositionDispId, ole.DISPATCH_PROPERTYPUT, float64(seconds))
+	_, err = disp.Invoke(PlayerPositionDispId, ole.DISPATCH_PROPERTYPUT, float64(seconds))
 	return err
 }
 
-func GetPlayerButtonsState(dispatcher *ole.IDispatch) (prevEnabled bool, state int32, nextEnabled bool, err error) {
+func GetPlayerButtonsState(disp *ole.IDispatch) (prevEnabled bool, state int32, nextEnabled bool, err error) {
 	var next int16
 	var prev int16
 
@@ -191,11 +183,11 @@ func GetPlayerButtonsState(dispatcher *ole.IDispatch) (prevEnabled bool, state i
 	var excep ole.EXCEPINFO
 	var argErr uint32
 
-	vtbl := dispatcher.VTable()
+	vtbl := disp.VTable()
 
 	hr, _, _ := syscall.SyscallN(
 		vtbl.Invoke,
-		uintptr(unsafe.Pointer(dispatcher)),    // this
+		uintptr(unsafe.Pointer(disp)),          // this
 		uintptr(0x60020046),                    // DISPID GetPlayerButtonsState
 		uintptr(unsafe.Pointer(&ole.IID_NULL)), // riid
 		uintptr(0),                             // lcid
@@ -226,15 +218,15 @@ func SafeGetCurrentPlaylist(tunesDisp *ole.IDispatch) (*ole.IDispatch, error) {
 			return nil, err
 		}
 		defer currentPlaylist.Clear()
-	
-		playlistDispatcher := currentPlaylist.ToIDispatch()
-	
-		if playlistDispatcher != nil {
+
+		playlistDisp := currentPlaylist.ToIDispatch()
+
+		if playlistDisp != nil {
 			// Increments the reference count for an interface pointer to a COM object.
 			// You should call this method whenever you make a copy of an interface pointer
 			// https://learn.microsoft.com/en-us/windows/win32/api/unknwn/nf-unknwn-iunknown-addref
-			playlistDispatcher.AddRef()
-			return playlistDispatcher, nil
+			playlistDisp.AddRef()
+			return playlistDisp, nil
 		}
 	}
 	return nil, nil

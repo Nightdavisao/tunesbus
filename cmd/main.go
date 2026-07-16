@@ -117,7 +117,7 @@ func (m *BusPlayer) Seek(offset types.Microseconds) error {
 	return nil
 }
 
-func (m *BusPlayer) SetPosition(trackId string, position types.Microseconds) error {
+func (m *BusPlayer) SetPosition(trackId dbus.ObjectPath, position types.Microseconds) error {
 	log.Debug("setting Position", position)
 
 	seconds := (time.Duration(position) * time.Microsecond) / time.Second
@@ -150,10 +150,18 @@ func (m *BusPlayer) SetRate(rate float64) error {
 }
 
 func (m *BusPlayer) Metadata() (types.Metadata, error) {
-	log.Debug("Metadata called", *m.state.currentMetadata)
 	if m.state.currentMetadata != nil {
-		return *m.state.currentMetadata, nil
+		log.Info("Metadata called", *m.state.currentMetadata)
+		if m.state.currentMetadata.TrackId.IsValid() {
+			return *m.state.currentMetadata, nil
+		}
 	}
+	if m.state.currentMetadata == nil {
+		log.Info("Metadata called", "metadata is nil, using fallback")
+	} else {
+		log.Info("Metadata called", "metadata has invalid track id, using fallback", "track_id", m.state.currentMetadata.TrackId)
+	}
+
 	return types.Metadata{
 		TrackId: dbus.ObjectPath("/org/mpris/MediaPlayer2/Track/1"),
 		Title:   "Nothing playing",
@@ -232,16 +240,16 @@ func (m *BusPlayer) Shuffle() (bool, error) {
 	m.state.mux.Lock()
 	defer m.state.mux.Unlock()
 
-	playlistDispatcher, err := itunes.SafeGetCurrentPlaylist(m.tunesDispatch)
+	playlistDispatch, err := itunes.SafeGetCurrentPlaylist(m.tunesDispatch)
 	if err != nil {
 		log.Error("failed to get current playlist on getting Shuffle", err)
 		return false, nil
 	}
 
-	if playlistDispatcher != nil {
-		defer playlistDispatcher.Release()
+	if playlistDispatch != nil {
+		defer playlistDispatch.Release()
 
-		shuffleStatus, err := oleutil.GetProperty(playlistDispatcher, "Shuffle")
+		shuffleStatus, err := oleutil.GetProperty(playlistDispatch, "Shuffle")
 		if err != nil {
 			log.Error("failed to get shuffle status", err)
 			return false, err
@@ -267,11 +275,13 @@ func (m *BusPlayer) SetShuffle(shuffle bool) error {
 
 	if playlistDispatcher != nil {
 		defer playlistDispatcher.Release()
-		_, err = oleutil.PutProperty(playlistDispatcher, "Shuffle", shuffle)
+
+		result, err := oleutil.PutProperty(playlistDispatcher, "Shuffle", shuffle)
 		if err != nil {
 			log.Error("failed to put shuffle status", "error", err)
 			return err
 		}
+		result.Clear()
 	}
 	return nil
 }
@@ -285,15 +295,17 @@ func (m *BusPlayer) LoopStatus() (types.LoopStatus, error) {
 		log.Error("failed to get current playlist on getting Loop", err)
 		return types.LoopStatusNone, err
 	}
+	if playlistDisp == nil {
+		return types.LoopStatusNone, nil
+	}
+	defer playlistDisp.Release()
 
-	var songRepeat *itunes.ITPlayerRepeatMode
-	if playlistDisp != nil {
-		defer playlistDisp.Release()
-
-		songRepeat, err = olejunk.GetPropertyFromIDispatch[itunes.ITPlayerRepeatMode](playlistDisp, "SongRepeat")
-		if err != nil {
-			return types.LoopStatusNone, err
-		}
+	songRepeat, err := olejunk.GetPropertyFromIDispatch[itunes.ITPlayerRepeatMode](playlistDisp, "SongRepeat")
+	if err != nil {
+		return types.LoopStatusNone, err
+	}
+	if songRepeat == nil {
+		return types.LoopStatusNone, nil
 	}
 
 	switch *songRepeat {
@@ -310,16 +322,16 @@ func (m *BusPlayer) SetLoopStatus(status types.LoopStatus) error {
 	m.state.mux.Lock()
 	defer m.state.mux.Unlock()
 
-	playlistDispatcher, err := itunes.SafeGetCurrentPlaylist(m.tunesDispatch)
+	playlistDispatch, err := itunes.SafeGetCurrentPlaylist(m.tunesDispatch)
 	if err != nil {
 		log.Error("failed to get current playlist on setting Loop", err)
 		return err
 	}
-	if playlistDispatcher == nil {
+	if playlistDispatch == nil {
 		log.Debug("no playlist yet")
 		return nil
 	}
-	defer playlistDispatcher.Release()
+	defer playlistDispatch.Release()
 
 	var mode int32
 	switch status {
@@ -330,7 +342,7 @@ func (m *BusPlayer) SetLoopStatus(status types.LoopStatus) error {
 	default:
 		mode = 0
 	}
-	_, err = oleutil.PutProperty(playlistDispatcher, "SongRepeat", mode)
+	_, err = oleutil.PutProperty(playlistDispatch, "SongRepeat", mode)
 	return err
 }
 
@@ -348,10 +360,14 @@ type State struct {
 	tunesDisp       *ole.IDispatch
 	mux             sync.RWMutex
 	quitOnce        sync.Once
+	mprisStartOnce  sync.Once
+	initialSyncOnce sync.Once
 	currentMetadata *types.Metadata
 	artworkCache    WeakTrackArtworkCache
 	currentVolume   int64
 	currentPosition int64
+	lastPlayerState itunes.ITPlayerState
+	hasPlayerState  bool
 	server          *server.Server
 	mprisHandler    *events.EventHandler
 	ticker          *time.Ticker
@@ -362,6 +378,47 @@ type tunesEventHandler struct {
 	state         *State
 	tunesDispatch *ole.IDispatch
 	handler       *events.EventHandler
+}
+
+func (state *State) ensureMprisStarted() {
+	state.mprisStartOnce.Do(func() {
+		go state.startServingBus(state.server)
+	})
+}
+
+func (state *State) waitForMprisReady(timeout time.Duration) bool {
+	if state.server == nil {
+		return false
+	}
+	if state.server.Conn != nil {
+		return true
+	}
+	if timeout <= 0 {
+		select {
+		case <-state.server.Ready():
+			return true
+		default:
+			return false
+		}
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case <-state.server.Ready():
+		return true
+	case <-state.quit:
+		return false
+	case <-timer.C:
+		return state.server.Conn != nil
+	}
+}
+
+func (state *State) emitInitialMprisState() {
+	state.initialSyncOnce.Do(func() {
+		state.mprisHandler.Player.OnAll()
+	})
 }
 
 // note that this is already releasing the track's dispatcher object, don't release it yourself after using this
@@ -377,18 +434,18 @@ func setPlayerMetadata(track *itunes.IiTrack, state *State) error {
 			Length:      types.Microseconds(secondsToMicro(track.Duration)),
 			DiscNumber:  int(track.DiscNumber),
 			TrackNumber: int(track.TrackNumber),
-			TrackId:     dbus.ObjectPath(fmt.Sprintf("/org/mpris/MediaPlayer2/Track/%d", track.TrackID)),
+			TrackId:     dbus.ObjectPath(fmt.Sprintf("/org/itunes/track/%d", track.TrackID)),
 		}
+
 		if track.IDispatch != nil {
-			log.Debug("partial new metadata (not sent yet)", state.currentMetadata)
+			log.Info("partial new metadata (not sent yet)", "metadata", state.currentMetadata, "track", track, "dispatch", track.IDispatch)
 			defer track.IDispatch.Release()
 
-			log.Debug(&state.artworkCache.store)
 			val, exists := state.artworkCache.store.Get(track.TrackID)
 			if exists {
 				metadata.ArtUrl = val
 				*state.currentMetadata = metadata
-				log.Debug("will send cached artwork from weak map", track.TrackID, val)
+				log.Info("will send cached artwork from weak map", "track_id", track.TrackID, "value", val)
 				if state.server.Conn == nil {
 					log.Debug("dbus server connection is not ready yet")
 					return nil
@@ -397,13 +454,17 @@ func setPlayerMetadata(track *itunes.IiTrack, state *State) error {
 			}
 
 			// if we don't have the artwork...
-			log.Debug("artwork for this track doesn't exist yet", track.TrackID)
+			log.Info("artwork for this track doesn't exist yet", "track_id", track.TrackID)
 
 			dosFilename, err := itunes.SaveArtworkIfAvaliable(track.IDispatch, track)
-			log.Debug("dos filename for artwork", dosFilename)
+			log.Info("dos filename for artwork", "dos_filename", dosFilename)
 			if err != nil {
+				log.Info("failed to get artwork")
 				log.Error("failed to retrieve artwork for current track", err)
 				*state.currentMetadata = metadata
+				if state.server == nil || state.server.Conn == nil {
+					return nil
+				}
 				return state.mprisHandler.Player.OnTitle()
 			}
 
@@ -411,6 +472,9 @@ func setPlayerMetadata(track *itunes.IiTrack, state *State) error {
 			if err != nil {
 				log.Error("failed to retrieve unix filename for saved artwork", err)
 				*state.currentMetadata = metadata
+				if state.server == nil || state.server.Conn == nil {
+					return nil
+				}
 				return state.mprisHandler.Player.OnTitle()
 			}
 			log.Debug("unix filename for artwork", unixFilename)
@@ -426,12 +490,11 @@ func setPlayerMetadata(track *itunes.IiTrack, state *State) error {
 			}
 			return state.mprisHandler.Player.OnTitle()
 		}
-		return fmt.Errorf("track.Dispatcher is nil")
+		return fmt.Errorf("track.IDispatch is nil")
 	}
 
-	// send only the bogus trackid if we don't have anything to begin with (stops godbus/dbus from spamming the console)
 	if state.server.Conn == nil {
-		log.Debug("dbus server connection is not ready yet")
+		log.Info("dbus server connection is not ready yet")
 		return nil
 	}
 	return state.mprisHandler.Player.OnTitle()
@@ -454,12 +517,15 @@ func (m *tunesEventHandler) OnPlayerPlayEvent(t *itunes.IiTrack) {
 		log.Error("failed to set initial metadata", err)
 		return
 	}
-	if m.state.server.Conn == nil {
-		go m.state.startServingBus(m.state.server)
-		m.handler.Player.OnAll()
+
+	m.state.ensureMprisStarted()
+	if !m.state.waitForMprisReady(2 * time.Second) {
+		log.Warn("MPRIS server is not ready yet, skipping play emit")
+		return
 	}
+
+	m.state.emitInitialMprisState()
 	m.handler.Player.OnPlayPause()
-	m.handler.Player.OnPlayback()
 }
 
 func (m *tunesEventHandler) OnPlayerStopEvent(t *itunes.IiTrack) {
@@ -469,8 +535,6 @@ func (m *tunesEventHandler) OnPlayerStopEvent(t *itunes.IiTrack) {
 		log.Error("failed to set initial metadata", err)
 		return
 	}
-	m.handler.Player.OnPlayPause()
-	m.handler.Player.OnPlayback()
 	m.handler.Player.OnEnded()
 }
 
@@ -482,7 +546,6 @@ func (m *tunesEventHandler) OnPlayerPlayingTrackChangedEvent(t *itunes.IiTrack) 
 		return
 	}
 	m.handler.Player.OnPlayPause()
-	m.handler.Player.OnPlayback()
 	m.handler.Player.OnTitle()
 }
 
@@ -499,7 +562,10 @@ func (m *tunesEventHandler) OnAboutToPromptUserToQuitEvent() {
 
 func (m *tunesEventHandler) OnSoundVolumeChangedEvent(val *int64) {
 	log.Debug("received OnSoundVolumeChangedEvent", *val)
-	m.state.currentVolume = *val
+	if m.state.currentVolume == *val {
+		return
+	}
+	m.state.currentVolume = *val	
 	m.handler.Player.OnVolume()
 }
 
@@ -518,17 +584,33 @@ func (state *State) startTicker() {
 		case <-state.quit:
 			return
 		case <-state.ticker.C:
+			if !state.waitForMprisReady(0) {
+				continue
+			}
 			if state.tunesDisp != nil {
 				tunes, _ := itunes.GetCurrentTunes(state.tunesDisp)
-				if tunes != nil && state.currentMetadata != nil {
+				if tunes != nil {
+					if !state.hasPlayerState || tunes.PlayerState != state.lastPlayerState {
+						state.lastPlayerState = tunes.PlayerState
+						state.hasPlayerState = true
+						state.mprisHandler.Player.OnPlayPause()
+					}
+
+					if int64(tunes.SoundVolume) != state.currentVolume {
+						state.currentVolume = int64(tunes.SoundVolume)
+						state.mprisHandler.Player.OnVolume()
+					}
+
 					if tunes.PlayerPositionMS > 0 {
 						position := time.Duration(tunes.PlayerPositionMS) * time.Millisecond
 						state.currentPosition = position.Microseconds()
 
-						state.mprisHandler.Player.OnTitle()
-						state.mprisHandler.Player.OnOptions()
-						state.mprisHandler.Player.OnPosition()
+						if tunes.PlayerState == itunes.ITPlayerStatePlaying {
+							state.mprisHandler.Player.OnPosition()
+						}
 					}
+
+					state.mprisHandler.Player.OnOptions()
 				}
 			}
 		}
@@ -545,6 +627,7 @@ func (state *State) ParseArgs() {
 
 	if *debugModePtr {
 		log.SetLevel(log.DebugLevel)
+		return
 	}
 }
 
@@ -572,7 +655,7 @@ func main() {
 
 	if *state.config.diagnosticsOnly {
 		text := ""
-		
+
 		wineVersion, err := wine.GetWineVersion()
 		if err != nil {
 			wine.ErrorMessageBox(
@@ -639,20 +722,6 @@ func main() {
 	}
 	go state.startTicker()
 
-	curr, err := itunes.GetCurrentTrack(tunesDispatch)
-	if state.server.Conn != nil {
-		if err == nil {
-			if curr != nil && curr.IDispatch != nil {
-				log.Debug("current track", curr)
-
-				setPlayerMetadata(curr, state)
-			}
-		} else {
-			log.Debug("failed to get current track, probably itunes doesn't have anything in the queue...")
-		}
-	}
-	state.mprisHandler.Player.OnAll()
-
 	err = sink.ListenEvents(state.quit)
 	if err != nil {
 		state.QuitSafely(err, "failed to listen for COM events")
@@ -667,9 +736,9 @@ func (state *State) QuitSafely(err error, message string) {
 		if err != nil {
 			log.Warn("failed to stop the dbus server. you might want to force kill wineserver with \"wineserver -k\"...")
 			wine.WarningMessageBox(
-				"tunesbus", 
+				"tunesbus",
 				"Failed to stop the dbus server. You might want to force kill wineserver with the command below.\n\n"+
-				fmt.Sprintf("WINEPREFIX=%s wineserver -k", wine.GetWinePrefix()),
+					fmt.Sprintf("WINEPREFIX=%s wineserver -k", wine.GetWinePrefix()),
 			)
 		}
 	}

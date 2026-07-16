@@ -1,14 +1,18 @@
 package olejunk
 
 import (
+	"fmt"
+	"reflect"
+
 	"github.com/go-ole/go-ole"
 	"github.com/go-ole/go-ole/oleutil"
-	"fmt"
 )
 
 func GetPropertyFromIDispatch[T any](disp *ole.IDispatch, name string, params ...any) (*T, error) {
-	disp.AddRef()
 	variant, err := oleutil.GetProperty(disp, name, params...)
+	if err != nil {
+		return nil, err
+	}
 	property, err := GetVariantValue[T](variant)
 	if err != nil {
 		return nil, err
@@ -21,7 +25,6 @@ func GetPropertiesFromIDispatch[T any](disp *ole.IDispatch, properties []string)
 	result := make(map[string]*T, len(properties))
 	for _, name := range properties {
 		value, err := GetPropertyFromIDispatch[T](disp, name)
-		defer disp.Release()
 		if err != nil {
 			return nil, fmt.Errorf("property %s: %w", name, err)
 		}
@@ -31,8 +34,24 @@ func GetPropertiesFromIDispatch[T any](disp *ole.IDispatch, properties []string)
 }
 
 func GetVariantValue[T any](variant *ole.VARIANT) (name *T, err error) {
+	if variant == nil {
+		return nil, fmt.Errorf("property returned no value")
+	}
 	defer variant.Clear()
-	v, ok := variant.Value().(T)
+
+	value := reflect.ValueOf(variant.Value())
+	targetType := reflect.TypeOf((*T)(nil)).Elem()
+	if !value.IsValid() {
+		return nil, fmt.Errorf("property %v returned no value", variant)
+	}
+	if !value.Type().AssignableTo(targetType) {
+		if !value.Type().ConvertibleTo(targetType) {
+			return nil, fmt.Errorf("property %v did not return %v", variant, targetType)
+		}
+		value = value.Convert(targetType)
+	}
+
+	v, ok := value.Interface().(T)
 	if !ok {
 		return nil, fmt.Errorf("property %v did not return %T", variant, name)
 	}
