@@ -189,7 +189,7 @@ func NewTunesDispatch() (*ole.IDispatch, error) {
 	return iTunesDispatch, err
 }
 
-func (c *COMEventSink) disconnectObject() {
+func (c *COMEventSink) DisconnectObject() {
 	if c.connectionPoint == nil {
 		return
 	}
@@ -203,7 +203,7 @@ func (c *COMEventSink) disconnectObject() {
 	c.connectionPoint = nil
 }
 
-func (c *COMEventSink) ListenEvents(done chan struct{}) error {
+func (c *COMEventSink) ListenEvents() error {
 	log.Info("setting the event receiver up")
 	defer ole.CoUninitialize()
 	iid, err := ole.CLSIDFromString(IID_IiTunesEvents)
@@ -232,7 +232,6 @@ func (c *COMEventSink) ListenEvents(done chan struct{}) error {
 		log.Error("failed to connect the eventReceiver object", err)
 		return err
 	}
-	defer c.disconnectObject()
 
 	var msg ole.Msg
 	for {

@@ -74,41 +74,40 @@ func (r BusRoot) SupportedMimeTypes() ([]string, error) {
 
 type BusPlayer struct {
 	state         *State
-	tunesDispatch *ole.IDispatch
 }
 
 func (m *BusPlayer) Next() error {
-	r, err := oleutil.CallMethod(m.tunesDispatch, "NextTrack")
+	r, err := oleutil.CallMethod(m.state.tunesDisp, "NextTrack")
 	r.Clear()
 	return err
 }
 
 func (m *BusPlayer) Previous() error {
-	r, err := oleutil.CallMethod(m.tunesDispatch, "PreviousTrack")
+	r, err := oleutil.CallMethod(m.state.tunesDisp, "PreviousTrack")
 	r.Clear()
 	return err
 }
 
 func (m *BusPlayer) Pause() error {
-	r, err := oleutil.CallMethod(m.tunesDispatch, "Pause")
+	r, err := oleutil.CallMethod(m.state.tunesDisp, "Pause")
 	r.Clear()
 	return err
 }
 
 func (m *BusPlayer) PlayPause() error {
-	r, err := oleutil.CallMethod(m.tunesDispatch, "PlayPause")
+	r, err := oleutil.CallMethod(m.state.tunesDisp, "PlayPause")
 	r.Clear()
 	return err
 }
 
 func (m *BusPlayer) Stop() error {
-	r, err := oleutil.CallMethod(m.tunesDispatch, "Stop")
+	r, err := oleutil.CallMethod(m.state.tunesDisp, "Stop")
 	r.Clear()
 	return err
 }
 
 func (m *BusPlayer) Play() error {
-	r, err := oleutil.CallMethod(m.tunesDispatch, "Play")
+	r, err := oleutil.CallMethod(m.state.tunesDisp, "Play")
 	r.Clear()
 	return err
 }
@@ -121,7 +120,7 @@ func (m *BusPlayer) SetPosition(trackId dbus.ObjectPath, position types.Microsec
 	log.Debug("setting Position", position)
 
 	seconds := (time.Duration(position) * time.Microsecond) / time.Second
-	err := itunes.SetTunesPosition(m.tunesDispatch, int64(seconds))
+	err := itunes.SetTunesPosition(m.state.tunesDisp, int64(seconds))
 	return err
 }
 
@@ -131,7 +130,7 @@ func (m *BusPlayer) OpenUri(uri string) error {
 
 func (m *BusPlayer) PlaybackStatus() (types.PlaybackStatus, error) {
 	log.Debug("PlaybackStatus called")
-	tunes, err := itunes.GetCurrentTunes(m.tunesDispatch)
+	tunes, err := itunes.GetCurrentTunes(m.state.tunesDisp)
 	mprisState := types.PlaybackStatusPaused
 	if tunes != nil {
 		if tunes.PlayerState == itunes.ITPlayerStatePlaying {
@@ -162,10 +161,7 @@ func (m *BusPlayer) Metadata() (types.Metadata, error) {
 		log.Info("Metadata called", "metadata has invalid track id, using fallback", "track_id", m.state.currentMetadata.TrackId)
 	}
 
-	return types.Metadata{
-		TrackId: dbus.ObjectPath("/org/mpris/MediaPlayer2/Track/1"),
-		Title:   "Nothing playing",
-	}, nil
+	return types.Metadata{}, nil
 }
 
 func (m *BusPlayer) Volume() (float64, error) {
@@ -174,7 +170,8 @@ func (m *BusPlayer) Volume() (float64, error) {
 }
 
 func (m *BusPlayer) SetVolume(volume float64) error {
-	_, err := oleutil.PutProperty(m.tunesDispatch, "SoundVolume", volume*100)
+	r, err := oleutil.PutProperty(m.state.tunesDisp, "SoundVolume", volume*100)
+	r.Clear()
 	return err
 }
 
@@ -195,7 +192,7 @@ func (m *BusPlayer) CanGoNext() (bool, error) {
 	m.state.mux.Lock()
 	defer m.state.mux.Unlock()
 
-	_, _, nextEnabled, err := itunes.GetPlayerButtonsState(m.tunesDispatch)
+	_, _, nextEnabled, err := itunes.GetPlayerButtonsState(m.state.tunesDisp)
 	log.Debug("CanGoNext called (expensive call)", "nextEnabled", nextEnabled)
 	return nextEnabled, err
 }
@@ -204,7 +201,7 @@ func (m *BusPlayer) CanGoPrevious() (bool, error) {
 	m.state.mux.Lock()
 	defer m.state.mux.Unlock()
 
-	previousEnabled, _, _, err := itunes.GetPlayerButtonsState(m.tunesDispatch)
+	previousEnabled, _, _, err := itunes.GetPlayerButtonsState(m.state.tunesDisp)
 	log.Debug("CanGoPrevious called (expensive call)", "previousEnabled")
 	return previousEnabled, err
 }
@@ -213,7 +210,7 @@ func (m *BusPlayer) CanPlay() (bool, error) {
 	m.state.mux.Lock()
 	defer m.state.mux.Unlock()
 
-	_, buttonState, _, err := itunes.GetPlayerButtonsState(m.tunesDispatch)
+	_, buttonState, _, err := itunes.GetPlayerButtonsState(m.state.tunesDisp)
 	log.Debug("CanPlay called (expensive call)", "buttonState", buttonState)
 	return buttonState != itunes.ITPlayButtonStatePauseDisabled &&
 		buttonState != itunes.ITPlayButtonStatePlayDisabled, err
@@ -223,7 +220,7 @@ func (m *BusPlayer) CanPause() (bool, error) {
 	m.state.mux.Lock()
 	defer m.state.mux.Unlock()
 
-	_, buttonState, _, err := itunes.GetPlayerButtonsState(m.tunesDispatch)
+	_, buttonState, _, err := itunes.GetPlayerButtonsState(m.state.tunesDisp)
 	return buttonState != itunes.ITPlayButtonStatePauseDisabled &&
 		buttonState != itunes.ITPlayButtonStatePlayDisabled, err
 }
@@ -240,7 +237,7 @@ func (m *BusPlayer) Shuffle() (bool, error) {
 	m.state.mux.Lock()
 	defer m.state.mux.Unlock()
 
-	playlistDispatch, err := itunes.SafeGetCurrentPlaylist(m.tunesDispatch)
+	playlistDispatch, err := itunes.SafeGetCurrentPlaylist(m.state.tunesDisp)
 	if err != nil {
 		log.Error("failed to get current playlist on getting Shuffle", err)
 		return false, nil
@@ -267,7 +264,7 @@ func (m *BusPlayer) SetShuffle(shuffle bool) error {
 	m.state.mux.Lock()
 	defer m.state.mux.Unlock()
 
-	playlistDispatcher, err := itunes.SafeGetCurrentPlaylist(m.tunesDispatch)
+	playlistDispatcher, err := itunes.SafeGetCurrentPlaylist(m.state.tunesDisp)
 	if err != nil {
 		log.Error("failed to get current playlist on setting Shuffle", err)
 		return nil
@@ -290,7 +287,7 @@ func (m *BusPlayer) LoopStatus() (types.LoopStatus, error) {
 	m.state.mux.Lock()
 	defer m.state.mux.Unlock()
 
-	playlistDisp, err := itunes.SafeGetCurrentPlaylist(m.tunesDispatch)
+	playlistDisp, err := itunes.SafeGetCurrentPlaylist(m.state.tunesDisp)
 	if err != nil {
 		log.Error("failed to get current playlist on getting Loop", err)
 		return types.LoopStatusNone, err
@@ -322,7 +319,7 @@ func (m *BusPlayer) SetLoopStatus(status types.LoopStatus) error {
 	m.state.mux.Lock()
 	defer m.state.mux.Unlock()
 
-	playlistDispatch, err := itunes.SafeGetCurrentPlaylist(m.tunesDispatch)
+	playlistDispatch, err := itunes.SafeGetCurrentPlaylist(m.state.tunesDisp)
 	if err != nil {
 		log.Error("failed to get current playlist on setting Loop", err)
 		return err
@@ -370,6 +367,7 @@ type State struct {
 	hasPlayerState  bool
 	server          *server.Server
 	mprisHandler    *events.EventHandler
+	comSink         *itunes.COMEventSink
 	ticker          *time.Ticker
 	quit            chan struct{}
 }
@@ -535,6 +533,7 @@ func (m *tunesEventHandler) OnPlayerStopEvent(t *itunes.IiTrack) {
 		log.Error("failed to set initial metadata", err)
 		return
 	}
+	m.handler.Player.OnTitle()
 	m.handler.Player.OnEnded()
 }
 
@@ -565,7 +564,7 @@ func (m *tunesEventHandler) OnSoundVolumeChangedEvent(val *int64) {
 	if m.state.currentVolume == *val {
 		return
 	}
-	m.state.currentVolume = *val	
+	m.state.currentVolume = *val
 	m.handler.Player.OnVolume()
 }
 
@@ -691,38 +690,38 @@ func main() {
 		return
 	}
 
-	tunesDispatch, err := itunes.NewTunesDispatch()
+	var err error
+
+	state.tunesDisp, err = itunes.NewTunesDispatch()
 	if err != nil {
 		state.QuitSafely(err, "failed to initialize dispatcher")
 		return
 	}
-	state.tunesDisp = tunesDispatch
 
 	busRoot := BusRoot{
 		state: state,
 	}
 
 	busPlayer := BusPlayer{
-		tunesDispatch: tunesDispatch,
-		state:         state,
+		state: state,
 	}
 
 	state.server = server.NewServer(*state.config.identity, busRoot, &busPlayer)
 	state.mprisHandler = events.NewEventHandler(state.server)
 
 	handler := &tunesEventHandler{
-		state:         state,
-		handler:       state.mprisHandler,
-		tunesDispatch: tunesDispatch,
+		state:   state,
+		handler: state.mprisHandler,
 	}
 
-	sink, err := itunes.NewCOMEventSink(tunesDispatch, handler)
+	state.comSink, err = itunes.NewCOMEventSink(state.tunesDisp, handler)
 	if err != nil {
 		state.QuitSafely(err, "something failed when setting up the event sink")
 	}
+
 	go state.startTicker()
 
-	err = sink.ListenEvents(state.quit)
+	err = state.comSink.ListenEvents()
 	if err != nil {
 		state.QuitSafely(err, "failed to listen for COM events")
 	}
@@ -742,6 +741,10 @@ func (state *State) QuitSafely(err error, message string) {
 			)
 		}
 	}
+	if state.comSink != nil {
+		state.comSink.DisconnectObject()
+	}
+
 	code := 0
 
 	if err != nil {

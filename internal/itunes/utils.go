@@ -38,6 +38,7 @@ func GetCurrentTrack(disp *ole.IDispatch) (*IiTrack, error) {
 	return nil, errors.New("disp is not ready")
 }
 
+// only used for getting properties such as volume and player position. this does not have an idispatch instance
 func GetCurrentTunes(disp *ole.IDispatch) (*IiTunes, error) {
 	if disp == nil {
 		return nil, errors.New("disp is not ready")
