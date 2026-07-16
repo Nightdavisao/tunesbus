@@ -28,7 +28,7 @@ import (
 )
 
 type BusRoot struct {
-	state *State
+	state *MainState
 }
 
 func (r BusRoot) Raise() error {
@@ -73,7 +73,7 @@ func (r BusRoot) SupportedMimeTypes() ([]string, error) {
 }
 
 type BusPlayer struct {
-	state         *State
+	state *MainState
 }
 
 func (m *BusPlayer) Next() error {
@@ -150,7 +150,7 @@ func (m *BusPlayer) SetRate(rate float64) error {
 
 func (m *BusPlayer) Metadata() (types.Metadata, error) {
 	if m.state.currentMetadata != nil {
-		log.Info("Metadata called", *m.state.currentMetadata)
+		log.Debug("Metadata called", *m.state.currentMetadata)
 		if m.state.currentMetadata.TrackId.IsValid() {
 			return *m.state.currentMetadata, nil
 		}
@@ -166,7 +166,7 @@ func (m *BusPlayer) Metadata() (types.Metadata, error) {
 
 func (m *BusPlayer) Volume() (float64, error) {
 	log.Debug("Volume called")
-	return float64(m.state.currentVolume / 100), nil
+	return float64(m.state.playbackState.currentVolume / 100), nil
 }
 
 func (m *BusPlayer) SetVolume(volume float64) error {
@@ -177,7 +177,7 @@ func (m *BusPlayer) SetVolume(volume float64) error {
 
 func (m *BusPlayer) Position() (int64, error) {
 	log.Debug("Position called")
-	return int64(m.state.currentPosition), nil
+	return int64(m.state.playbackState.currentPosition), nil
 }
 
 func (m *BusPlayer) MinimumRate() (float64, error) {
@@ -352,19 +352,27 @@ type Config struct {
 	diagnosticsOnly *bool
 }
 
-type State struct {
-	config          Config
-	tunesDisp       *ole.IDispatch
-	mux             sync.RWMutex
+type OnceGroup struct {
 	quitOnce        sync.Once
 	mprisStartOnce  sync.Once
 	initialSyncOnce sync.Once
-	currentMetadata *types.Metadata
-	artworkCache    WeakTrackArtworkCache
+}
+
+type PlaybackState struct {
 	currentVolume   int64
 	currentPosition int64
 	lastPlayerState itunes.ITPlayerState
 	hasPlayerState  bool
+}
+
+type MainState struct {
+	config          Config
+	tunesDisp       *ole.IDispatch
+	mux             sync.RWMutex
+	sync            OnceGroup
+	currentMetadata *types.Metadata
+	artworkCache    WeakTrackArtworkCache
+	playbackState   PlaybackState
 	server          *server.Server
 	mprisHandler    *events.EventHandler
 	comSink         *itunes.COMEventSink
@@ -373,18 +381,18 @@ type State struct {
 }
 
 type tunesEventHandler struct {
-	state         *State
+	state         *MainState
 	tunesDispatch *ole.IDispatch
 	handler       *events.EventHandler
 }
 
-func (state *State) ensureMprisStarted() {
-	state.mprisStartOnce.Do(func() {
+func (state *MainState) ensureMprisStarted() {
+	state.sync.mprisStartOnce.Do(func() {
 		go state.startServingBus(state.server)
 	})
 }
 
-func (state *State) waitForMprisReady(timeout time.Duration) bool {
+func (state *MainState) waitForMprisReady(timeout time.Duration) bool {
 	if state.server == nil {
 		return false
 	}
@@ -413,14 +421,14 @@ func (state *State) waitForMprisReady(timeout time.Duration) bool {
 	}
 }
 
-func (state *State) emitInitialMprisState() {
-	state.initialSyncOnce.Do(func() {
+func (state *MainState) emitInitialMprisState() {
+	state.sync.initialSyncOnce.Do(func() {
 		state.mprisHandler.Player.OnAll()
 	})
 }
 
-// note that this is already releasing the track's dispatcher object, don't release it yourself after using this
-func setPlayerMetadata(track *itunes.IiTrack, state *State) error {
+// note that this is already releasing the track's IDispatch object, don't release it yourself after using this
+func setPlayerMetadata(track *itunes.IiTrack, state *MainState) error {
 	state.mux.Lock()
 	defer state.mux.Unlock()
 
@@ -561,14 +569,14 @@ func (m *tunesEventHandler) OnAboutToPromptUserToQuitEvent() {
 
 func (m *tunesEventHandler) OnSoundVolumeChangedEvent(val *int64) {
 	log.Debug("received OnSoundVolumeChangedEvent", *val)
-	if m.state.currentVolume == *val {
+	if m.state.playbackState.currentVolume == *val {
 		return
 	}
-	m.state.currentVolume = *val
+	m.state.playbackState.currentVolume = *val
 	m.handler.Player.OnVolume()
 }
 
-func (state *State) startServingBus(s *server.Server) {
+func (state *MainState) startServingBus(s *server.Server) {
 	log.Info("starting MPRIS server...")
 	err := s.Listen()
 
@@ -577,7 +585,7 @@ func (state *State) startServingBus(s *server.Server) {
 	}
 }
 
-func (state *State) startTicker() {
+func (state *MainState) startTicker() {
 	for {
 		select {
 		case <-state.quit:
@@ -589,20 +597,20 @@ func (state *State) startTicker() {
 			if state.tunesDisp != nil {
 				tunes, _ := itunes.GetCurrentTunes(state.tunesDisp)
 				if tunes != nil {
-					if !state.hasPlayerState || tunes.PlayerState != state.lastPlayerState {
-						state.lastPlayerState = tunes.PlayerState
-						state.hasPlayerState = true
+					if !state.playbackState.hasPlayerState || tunes.PlayerState != state.playbackState.lastPlayerState {
+						state.playbackState.lastPlayerState = tunes.PlayerState
+						state.playbackState.hasPlayerState = true
 						state.mprisHandler.Player.OnPlayPause()
 					}
 
-					if int64(tunes.SoundVolume) != state.currentVolume {
-						state.currentVolume = int64(tunes.SoundVolume)
+					if int64(tunes.SoundVolume) != state.playbackState.currentVolume {
+						state.playbackState.currentVolume = int64(tunes.SoundVolume)
 						state.mprisHandler.Player.OnVolume()
 					}
 
 					if tunes.PlayerPositionMS > 0 {
 						position := time.Duration(tunes.PlayerPositionMS) * time.Millisecond
-						state.currentPosition = position.Microseconds()
+						state.playbackState.currentPosition = position.Microseconds()
 
 						if tunes.PlayerState == itunes.ITPlayerStatePlaying {
 							state.mprisHandler.Player.OnPosition()
@@ -616,7 +624,7 @@ func (state *State) startTicker() {
 	}
 }
 
-func (state *State) ParseArgs() {
+func (state *MainState) ParseArgs() {
 	debugModePtr := flag.Bool("debug", false, "Enable debug logging")
 
 	state.config.identity = flag.String("identity", "iTunes", "Custom identity for the MPRIS server\n"+
@@ -636,7 +644,7 @@ func main() {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 
-	state := &State{
+	state := &MainState{
 		ticker:          time.NewTicker(500 * time.Millisecond),
 		currentMetadata: &types.Metadata{},
 		artworkCache: WeakTrackArtworkCache{
@@ -729,7 +737,7 @@ func main() {
 	log.Info("the end")
 }
 
-func (state *State) QuitSafely(err error, message string) {
+func (state *MainState) QuitSafely(err error, message string) {
 	if state.server.Conn != nil {
 		err := state.server.Stop()
 		if err != nil {
@@ -766,7 +774,7 @@ func (state *State) QuitSafely(err error, message string) {
 	if state.tunesDisp != nil {
 		state.tunesDisp.Release()
 	}
-	state.quitOnce.Do(func() {
+	state.sync.quitOnce.Do(func() {
 		close(state.quit)
 	})
 }
