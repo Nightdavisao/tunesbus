@@ -189,31 +189,17 @@ func (m *BusPlayer) MaximumRate() (float64, error) {
 }
 
 func (m *BusPlayer) CanGoNext() (bool, error) {
-	m.state.mux.Lock()
-	defer m.state.mux.Unlock()
-
-	_, _, nextEnabled, err := itunes.GetPlayerButtonsState(m.state.tunesDisp)
-	log.Debug("CanGoNext called (expensive call)", "nextEnabled", nextEnabled)
-	return nextEnabled, err
+	return m.state.playbackState.canGoNext, nil
 }
 
 func (m *BusPlayer) CanGoPrevious() (bool, error) {
-	m.state.mux.Lock()
-	defer m.state.mux.Unlock()
-
-	previousEnabled, _, _, err := itunes.GetPlayerButtonsState(m.state.tunesDisp)
-	log.Debug("CanGoPrevious called (expensive call)", "previousEnabled")
-	return previousEnabled, err
+	return m.state.playbackState.canGoPrevious, nil
 }
 
 func (m *BusPlayer) CanPlay() (bool, error) {
-	m.state.mux.Lock()
-	defer m.state.mux.Unlock()
-
-	_, buttonState, _, err := itunes.GetPlayerButtonsState(m.state.tunesDisp)
-	log.Debug("CanPlay called (expensive call)", "buttonState", buttonState)
-	return buttonState != itunes.ITPlayButtonStatePauseDisabled &&
-		buttonState != itunes.ITPlayButtonStatePlayDisabled, err
+	log.Debug("CanPlay called", "buttonState", m.state.playbackState.lastPlayerState)
+	return m.state.playbackState.lastPlayerState != itunes.ITPlayButtonStatePauseDisabled &&
+		m.state.playbackState.lastPlayerState != itunes.ITPlayButtonStatePlayDisabled, nil
 }
 
 func (m *BusPlayer) CanPause() (bool, error) {
@@ -363,21 +349,29 @@ type PlaybackState struct {
 	currentPosition int64
 	lastPlayerState itunes.ITPlayerState
 	hasPlayerState  bool
+	canGoNext       bool
+	canGoPrevious   bool
 }
 
 type MainState struct {
-	config          Config
-	tunesDisp       *ole.IDispatch
-	mux             sync.RWMutex
-	sync            OnceGroup
+	config    Config
+	tunesDisp *ole.IDispatch
+
+	mux  sync.RWMutex
+	sync OnceGroup
+
 	currentMetadata *types.Metadata
-	artworkCache    WeakTrackArtworkCache
 	playbackState   PlaybackState
-	server          *server.Server
-	mprisHandler    *events.EventHandler
-	comSink         *itunes.COMEventSink
-	ticker          *time.Ticker
-	quit            chan struct{}
+
+	server       *server.Server
+	mprisHandler *events.EventHandler
+
+	comSink *itunes.COMEventSink
+
+	ticker *time.Ticker
+	quit   chan struct{}
+
+	artworkCache WeakTrackArtworkCache
 }
 
 type tunesEventHandler struct {
@@ -518,11 +512,24 @@ func milliToMicro(milli int64) int64 {
 
 func (m *tunesEventHandler) OnPlayerPlayEvent(t *itunes.IiTrack) {
 	log.Debug("received OnPlayerPlayEvent", t)
+
 	err := setPlayerMetadata(t, m.state)
 	if err != nil {
 		log.Error("failed to set initial metadata", err)
 		return
 	}
+
+	prevEnabled, _, nextEnabled, err := itunes.GetPlayerButtonsState(m.state.tunesDisp)
+	if err != nil {
+		log.Debug("failed to get buttons state, setting true for both previous and next anyway", "error", err)
+		m.state.playbackState.canGoNext = true
+		m.state.playbackState.canGoPrevious = true
+	} else {
+		log.Debug("button state", "prevEnabled", prevEnabled, "nextEnabled", nextEnabled)
+		m.state.playbackState.canGoPrevious = prevEnabled
+		m.state.playbackState.canGoNext = nextEnabled
+	}
+
 
 	m.state.ensureMprisStarted()
 	if !m.state.waitForMprisReady(2 * time.Second) {
