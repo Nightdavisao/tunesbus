@@ -207,9 +207,8 @@ func (m *BusPlayer) CanPause() (bool, error) {
 	m.state.mux.Lock()
 	defer m.state.mux.Unlock()
 
-	_, buttonState, _, err := itunes.GetPlayerButtonsState(m.state.tunesDisp)
-	return buttonState != itunes.ITPlayButtonStatePauseDisabled &&
-		buttonState != itunes.ITPlayButtonStatePlayDisabled, err
+	return m.state.playbackState.lastPlayerState != itunes.ITPlayButtonStatePauseDisabled &&
+		m.state.playbackState.lastPlayerState != itunes.ITPlayButtonStatePlayDisabled, nil
 }
 
 func (m *BusPlayer) CanSeek() (bool, error) {
