@@ -122,6 +122,12 @@ func (m *BusPlayer) SetPosition(trackId dbus.ObjectPath, position types.Microsec
 
 	seconds := (time.Duration(position) * time.Microsecond) / time.Second
 	err := itunes.SetTunesPosition(m.state.tunesDisp, int64(seconds))
+	if err == nil {
+		m.state.mux.Lock()
+		m.state.playbackState.currentPosition = int64(position)
+		m.state.playbackState.hasPosition = true
+		m.state.mux.Unlock()
+	}
 	return err
 }
 
@@ -131,14 +137,21 @@ func (m *BusPlayer) OpenUri(uri string) error {
 
 func (m *BusPlayer) PlaybackStatus() (types.PlaybackStatus, error) {
 	log.Debug("PlaybackStatus called")
-	tunes, err := itunes.GetCurrentTunes(m.state.tunesDisp)
-	mprisState := types.PlaybackStatusPaused
-	if tunes != nil {
-		if tunes.PlayerState == itunes.ITPlayerStatePlaying {
-			mprisState = types.PlaybackStatusPlaying
-		}
+	m.state.mux.RLock()
+	defer m.state.mux.RUnlock()
+
+	if !m.state.playbackState.hasPlayerState {
+		return types.PlaybackStatusPaused, nil
 	}
-	return mprisState, err
+
+	switch m.state.playbackState.playerState {
+	case itunes.ITPlayerStatePlaying:
+		return types.PlaybackStatusPlaying, nil
+	case itunes.ITPlayerStateStopped:
+		return types.PlaybackStatusStopped, nil
+	default:
+		return types.PlaybackStatusPaused, nil
+	}
 }
 
 func (m *BusPlayer) Rate() (float64, error) {
@@ -167,17 +180,30 @@ func (m *BusPlayer) Metadata() (types.Metadata, error) {
 
 func (m *BusPlayer) Volume() (float64, error) {
 	log.Debug("Volume called")
-	return float64(m.state.playbackState.currentVolume / 100), nil
+	m.state.mux.RLock()
+	defer m.state.mux.RUnlock()
+
+	return float64(m.state.playbackState.currentVolume) / 100, nil
 }
 
 func (m *BusPlayer) SetVolume(volume float64) error {
 	r, err := oleutil.PutProperty(m.state.tunesDisp, "SoundVolume", volume*100)
-	r.Clear()
+	if r != nil {
+		r.Clear()
+	}
+	if err == nil {
+		m.state.mux.Lock()
+		m.state.playbackState.currentVolume = int64(volume * 100)
+		m.state.mux.Unlock()
+	}
 	return err
 }
 
 func (m *BusPlayer) Position() (int64, error) {
 	log.Debug("Position called")
+	m.state.mux.RLock()
+	defer m.state.mux.RUnlock()
+
 	return int64(m.state.playbackState.currentPosition), nil
 }
 
@@ -190,25 +216,32 @@ func (m *BusPlayer) MaximumRate() (float64, error) {
 }
 
 func (m *BusPlayer) CanGoNext() (bool, error) {
+	m.state.mux.RLock()
+	defer m.state.mux.RUnlock()
+
 	return m.state.playbackState.canGoNext, nil
 }
 
 func (m *BusPlayer) CanGoPrevious() (bool, error) {
+	m.state.mux.RLock()
+	defer m.state.mux.RUnlock()
+
 	return m.state.playbackState.canGoPrevious, nil
 }
 
 func (m *BusPlayer) CanPlay() (bool, error) {
-	log.Debug("CanPlay called", "buttonState", m.state.playbackState.lastPlayerState)
-	return m.state.playbackState.lastPlayerState != itunes.ITPlayButtonStatePauseDisabled &&
-		m.state.playbackState.lastPlayerState != itunes.ITPlayButtonStatePlayDisabled, nil
+	m.state.mux.RLock()
+	defer m.state.mux.RUnlock()
+
+	log.Debug("CanPlay called", "buttonState", m.state.playbackState.playButtonState)
+	return m.state.playbackState.canPlayPause(), nil
 }
 
 func (m *BusPlayer) CanPause() (bool, error) {
-	m.state.mux.Lock()
-	defer m.state.mux.Unlock()
+	m.state.mux.RLock()
+	defer m.state.mux.RUnlock()
 
-	return m.state.playbackState.lastPlayerState != itunes.ITPlayButtonStatePauseDisabled &&
-		m.state.playbackState.lastPlayerState != itunes.ITPlayButtonStatePlayDisabled, nil
+	return m.state.playbackState.canPlayPause(), nil
 }
 
 func (m *BusPlayer) CanSeek() (bool, error) {
@@ -220,36 +253,13 @@ func (m *BusPlayer) CanControl() (bool, error) {
 }
 
 func (m *BusPlayer) Shuffle() (bool, error) {
-	m.state.mux.Lock()
-	defer m.state.mux.Unlock()
+	m.state.mux.RLock()
+	defer m.state.mux.RUnlock()
 
-	playlistDispatch, err := itunes.SafeGetCurrentPlaylist(m.state.tunesDisp)
-	if err != nil {
-		log.Error("failed to get current playlist on getting Shuffle", err)
-		return false, nil
-	}
-
-	if playlistDispatch != nil {
-		defer playlistDispatch.Release()
-
-		shuffleStatus, err := oleutil.GetProperty(playlistDispatch, "Shuffle")
-		if err != nil {
-			log.Error("failed to get shuffle status", err)
-			return false, err
-		}
-		r, err := olejunk.GetVariantValue[bool](shuffleStatus)
-		if err != nil {
-			return false, err
-		}
-		return *r, err
-	}
-	return false, nil
+	return m.state.playbackState.shuffle, nil
 }
 
 func (m *BusPlayer) SetShuffle(shuffle bool) error {
-	m.state.mux.Lock()
-	defer m.state.mux.Unlock()
-
 	playlistDispatcher, err := itunes.SafeGetCurrentPlaylist(m.state.tunesDisp)
 	if err != nil {
 		log.Error("failed to get current playlist on setting Shuffle", err)
@@ -265,46 +275,28 @@ func (m *BusPlayer) SetShuffle(shuffle bool) error {
 			return err
 		}
 		result.Clear()
+	} else {
+		log.Debug("no playlist yet")
+		return nil
 	}
+	m.state.mux.Lock()
+	m.state.playbackState.shuffle = shuffle
+	m.state.playbackState.hasShuffle = true
+	m.state.mux.Unlock()
 	return nil
 }
 
 func (m *BusPlayer) LoopStatus() (types.LoopStatus, error) {
-	m.state.mux.Lock()
-	defer m.state.mux.Unlock()
+	m.state.mux.RLock()
+	defer m.state.mux.RUnlock()
 
-	playlistDisp, err := itunes.SafeGetCurrentPlaylist(m.state.tunesDisp)
-	if err != nil {
-		log.Error("failed to get current playlist on getting Loop", err)
-		return types.LoopStatusNone, err
-	}
-	if playlistDisp == nil {
+	if !m.state.playbackState.hasLoopStatus {
 		return types.LoopStatusNone, nil
 	}
-	defer playlistDisp.Release()
-
-	songRepeat, err := olejunk.GetPropertyFromIDispatch[itunes.ITPlayerRepeatMode](playlistDisp, "SongRepeat")
-	if err != nil {
-		return types.LoopStatusNone, err
-	}
-	if songRepeat == nil {
-		return types.LoopStatusNone, nil
-	}
-
-	switch *songRepeat {
-	case itunes.ITPlayerRepeatModeOne:
-		return types.LoopStatusTrack, nil
-	case itunes.ITPlayerRepeatModeAll:
-		return types.LoopStatusPlaylist, nil
-	default:
-		return types.LoopStatusNone, nil
-	}
+	return m.state.playbackState.loopStatus, nil
 }
 
 func (m *BusPlayer) SetLoopStatus(status types.LoopStatus) error {
-	m.state.mux.Lock()
-	defer m.state.mux.Unlock()
-
 	playlistDispatch, err := itunes.SafeGetCurrentPlaylist(m.state.tunesDisp)
 	if err != nil {
 		log.Error("failed to get current playlist on setting Loop", err)
@@ -325,7 +317,15 @@ func (m *BusPlayer) SetLoopStatus(status types.LoopStatus) error {
 	default:
 		mode = 0
 	}
-	_, err = oleutil.PutProperty(playlistDispatch, "SongRepeat", mode)
+	r, err := oleutil.PutProperty(playlistDispatch, "SongRepeat", mode)
+	if err != nil {
+		return err
+	}
+	m.state.mux.Lock()
+	r.Clear()
+	m.state.playbackState.loopStatus = status
+	m.state.playbackState.hasLoopStatus = true
+	m.state.mux.Unlock()
 	return err
 }
 
@@ -347,10 +347,35 @@ type OnceGroup struct {
 type PlaybackState struct {
 	currentVolume   int64
 	currentPosition int64
-	lastPlayerState itunes.ITPlayerState
-	hasPlayerState  bool
+	hasPosition     bool
+
+	playerState    itunes.ITPlayerState
+	hasPlayerState bool
+
+	playButtonState int32
+	hasButtonState  bool
 	canGoNext       bool
 	canGoPrevious   bool
+
+	shuffle    bool
+	hasShuffle bool
+
+	loopStatus    types.LoopStatus
+	hasLoopStatus bool
+}
+
+func (state PlaybackState) canPlayPause() bool {
+	if !state.hasButtonState {
+		return true
+	}
+	return state.playButtonState != itunes.ITPlayButtonStatePauseDisabled &&
+		state.playButtonState != itunes.ITPlayButtonStatePlayDisabled
+}
+
+type playbackChanges struct {
+	playbackStatus bool
+	volume         bool
+	options        bool
 }
 
 type MainState struct {
@@ -510,6 +535,150 @@ func milliToMicro(milli int64) int64 {
 	return duration.Microseconds()
 }
 
+func repeatModeToLoopStatus(mode itunes.ITPlayerRepeatMode) types.LoopStatus {
+	switch mode {
+	case itunes.ITPlayerRepeatModeOne:
+		return types.LoopStatusTrack
+	case itunes.ITPlayerRepeatModeAll:
+		return types.LoopStatusPlaylist
+	default:
+		return types.LoopStatusNone
+	}
+}
+
+func getPlaylistOptions(tunesDisp *ole.IDispatch) (bool, types.LoopStatus, bool, error) {
+	playlistDisp, err := itunes.SafeGetCurrentPlaylist(tunesDisp)
+	if err != nil {
+		return false, types.LoopStatusNone, false, err
+	}
+	if playlistDisp == nil {
+		return false, types.LoopStatusNone, true, nil
+	}
+	defer playlistDisp.Release()
+
+	shuffleStatus, err := oleutil.GetProperty(playlistDisp, "Shuffle")
+	if err != nil {
+		return false, types.LoopStatusNone, false, err
+	}
+	defer shuffleStatus.Clear()
+
+	shuffle, err := olejunk.GetVariantValue[bool](shuffleStatus)
+	if err != nil {
+		return false, types.LoopStatusNone, false, err
+	}
+
+	songRepeat, err := olejunk.GetPropertyFromIDispatch[itunes.ITPlayerRepeatMode](playlistDisp, "SongRepeat")
+	if err != nil {
+		return false, types.LoopStatusNone, false, err
+	}
+	if songRepeat == nil {
+		return *shuffle, types.LoopStatusNone, true, nil
+	}
+
+	return *shuffle, repeatModeToLoopStatus(*songRepeat), true, nil
+}
+
+func (state *MainState) refreshPlaybackState(includeOptions bool) playbackChanges {
+	if state.tunesDisp == nil {
+		return playbackChanges{}
+	}
+
+	tunes, err := itunes.GetCurrentTunes(state.tunesDisp)
+	if err != nil {
+		log.Debug("failed to get current iTunes state", "error", err)
+		return playbackChanges{}
+	}
+	if tunes == nil {
+		return playbackChanges{}
+	}
+
+	var (
+		prevEnabled bool
+		buttonState int32
+		nextEnabled bool
+		buttonsOK   bool
+		shuffle     bool
+		loopStatus  types.LoopStatus
+		playlistOK  bool
+	)
+
+	if includeOptions {
+		prevEnabled, buttonState, nextEnabled, err = itunes.GetPlayerButtonsState(state.tunesDisp)
+		if err != nil {
+			log.Debug("failed to get player buttons state", "error", err)
+		} else {
+			buttonsOK = true
+		}
+
+		shuffle, loopStatus, playlistOK, err = getPlaylistOptions(state.tunesDisp)
+		if err != nil {
+			log.Debug("failed to get playlist options", "error", err)
+		}
+	}
+
+	changes := playbackChanges{}
+	position := time.Duration(tunes.PlayerPositionMS) * time.Millisecond
+
+	state.mux.Lock()
+	defer state.mux.Unlock()
+
+	if !state.playbackState.hasPlayerState || tunes.PlayerState != state.playbackState.playerState {
+		state.playbackState.playerState = tunes.PlayerState
+		state.playbackState.hasPlayerState = true
+		changes.playbackStatus = true
+	}
+
+	if int64(tunes.SoundVolume) != state.playbackState.currentVolume {
+		state.playbackState.currentVolume = int64(tunes.SoundVolume)
+		changes.volume = true
+	}
+
+	if tunes.PlayerPositionMS >= 0 {
+		state.playbackState.currentPosition = position.Microseconds()
+		state.playbackState.hasPosition = true
+	}
+
+	if buttonsOK {
+		if !state.playbackState.hasButtonState ||
+			state.playbackState.playButtonState != buttonState ||
+			state.playbackState.canGoPrevious != prevEnabled ||
+			state.playbackState.canGoNext != nextEnabled {
+			state.playbackState.playButtonState = buttonState
+			state.playbackState.hasButtonState = true
+			state.playbackState.canGoPrevious = prevEnabled
+			state.playbackState.canGoNext = nextEnabled
+			changes.options = true
+		}
+	}
+
+	if playlistOK {
+		if !state.playbackState.hasShuffle || state.playbackState.shuffle != shuffle {
+			state.playbackState.shuffle = shuffle
+			state.playbackState.hasShuffle = true
+			changes.options = true
+		}
+		if !state.playbackState.hasLoopStatus || state.playbackState.loopStatus != loopStatus {
+			state.playbackState.loopStatus = loopStatus
+			state.playbackState.hasLoopStatus = true
+			changes.options = true
+		}
+	}
+
+	return changes
+}
+
+func (state *MainState) emitPlaybackChanges(changes playbackChanges) {
+	if changes.playbackStatus {
+		state.mprisHandler.Player.OnPlayPause()
+	}
+	if changes.volume {
+		state.mprisHandler.Player.OnVolume()
+	}
+	if changes.options {
+		state.mprisHandler.Player.OnOptions()
+	}
+}
+
 func (m *tunesEventHandler) OnPlayerPlayEvent(t *itunes.IiTrack) {
 	log.Debug("received OnPlayerPlayEvent", t)
 
@@ -519,17 +688,7 @@ func (m *tunesEventHandler) OnPlayerPlayEvent(t *itunes.IiTrack) {
 		return
 	}
 
-	prevEnabled, _, nextEnabled, err := itunes.GetPlayerButtonsState(m.state.tunesDisp)
-	if err != nil {
-		log.Debug("failed to get buttons state, setting true for both previous and next anyway", "error", err)
-		m.state.playbackState.canGoNext = true
-		m.state.playbackState.canGoPrevious = true
-	} else {
-		log.Debug("button state", "prevEnabled", prevEnabled, "nextEnabled", nextEnabled)
-		m.state.playbackState.canGoPrevious = prevEnabled
-		m.state.playbackState.canGoNext = nextEnabled
-	}
-
+	changes := m.state.refreshPlaybackState(true)
 
 	m.state.ensureMprisStarted()
 	if !m.state.waitForMprisReady(2 * time.Second) {
@@ -538,7 +697,7 @@ func (m *tunesEventHandler) OnPlayerPlayEvent(t *itunes.IiTrack) {
 	}
 
 	m.state.emitInitialMprisState()
-	m.handler.Player.OnPlayPause()
+	m.state.emitPlaybackChanges(changes)
 }
 
 func (m *tunesEventHandler) OnPlayerStopEvent(t *itunes.IiTrack) {
@@ -548,6 +707,10 @@ func (m *tunesEventHandler) OnPlayerStopEvent(t *itunes.IiTrack) {
 		log.Error("failed to set initial metadata", err)
 		return
 	}
+	m.state.mux.Lock()
+	m.state.playbackState.playerState = itunes.ITPlayerStateStopped
+	m.state.playbackState.hasPlayerState = true
+	m.state.mux.Unlock()
 	m.handler.Player.OnTitle()
 	m.handler.Player.OnEnded()
 }
@@ -559,7 +722,7 @@ func (m *tunesEventHandler) OnPlayerPlayingTrackChangedEvent(t *itunes.IiTrack) 
 		log.Error("failed to set initial metadata", err)
 		return
 	}
-	m.handler.Player.OnPlayPause()
+	m.state.emitPlaybackChanges(m.state.refreshPlaybackState(true))
 	m.handler.Player.OnTitle()
 }
 
@@ -579,11 +742,17 @@ func (m *tunesEventHandler) OnAboutToPromptUserToQuitEvent() {
 }
 
 func (m *tunesEventHandler) OnSoundVolumeChangedEvent(val *int64) {
+	if val == nil {
+		return
+	}
 	log.Debug("received OnSoundVolumeChangedEvent", *val)
+	m.state.mux.Lock()
 	if m.state.playbackState.currentVolume == *val {
+		m.state.mux.Unlock()
 		return
 	}
 	m.state.playbackState.currentVolume = *val
+	m.state.mux.Unlock()
 	m.handler.Player.OnVolume()
 }
 
@@ -597,6 +766,9 @@ func (state *MainState) startServingBus(s *server.Server) {
 }
 
 func (state *MainState) startTicker() {
+	optionsTicker := time.NewTicker(2 * time.Second)
+	defer optionsTicker.Stop()
+
 	for {
 		select {
 		case <-state.quit:
@@ -605,32 +777,12 @@ func (state *MainState) startTicker() {
 			if !state.waitForMprisReady(0) {
 				continue
 			}
-			if state.tunesDisp != nil {
-				tunes, _ := itunes.GetCurrentTunes(state.tunesDisp)
-				if tunes != nil {
-					if !state.playbackState.hasPlayerState || tunes.PlayerState != state.playbackState.lastPlayerState {
-						state.playbackState.lastPlayerState = tunes.PlayerState
-						state.playbackState.hasPlayerState = true
-						state.mprisHandler.Player.OnPlayPause()
-					}
-
-					if int64(tunes.SoundVolume) != state.playbackState.currentVolume {
-						state.playbackState.currentVolume = int64(tunes.SoundVolume)
-						state.mprisHandler.Player.OnVolume()
-					}
-
-					if tunes.PlayerPositionMS > 0 {
-						position := time.Duration(tunes.PlayerPositionMS) * time.Millisecond
-						state.playbackState.currentPosition = position.Microseconds()
-
-						if tunes.PlayerState == itunes.ITPlayerStatePlaying {
-							state.mprisHandler.Player.OnPosition()
-						}
-					}
-
-					state.mprisHandler.Player.OnOptions()
-				}
+			state.emitPlaybackChanges(state.refreshPlaybackState(false))
+		case <-optionsTicker.C:
+			if !state.waitForMprisReady(0) {
+				continue
 			}
+			state.emitPlaybackChanges(state.refreshPlaybackState(true))
 		}
 	}
 }
