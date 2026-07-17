@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"runtime"
 	"sync"
@@ -571,7 +572,11 @@ func (m *tunesEventHandler) OnQuittingEvent() {
 func (m *tunesEventHandler) OnAboutToPromptUserToQuitEvent() {
 	log.Debug("received OnAboutToPromptUserToQuitEvent")
 	m.state.QuitSafely(nil, "")
-	// todo: 20seg~ timer to reconnect everything if that dialog happens to show up and the user clicks "Don't Quit"
+	// be evil
+	err := killTunes()
+	if err != nil {
+		log.Error("failed to kill iTunes.exe via taskkill", "err", err)
+	}
 }
 
 func (m *tunesEventHandler) OnSoundVolumeChangedEvent(val *int64) {
@@ -784,4 +789,13 @@ func (state *MainState) QuitSafely(err error, message string) {
 	state.sync.quitOnce.Do(func() {
 		close(state.quit)
 	})
+}
+
+func killTunes() error {
+	cmd := exec.Command("taskkill", "/F", "/IM", "iTunes.exe", "/T")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("taskkill failed: %v, output: %s", err, out)
+	}
+	return nil
 }
