@@ -3,8 +3,11 @@ package main
 import (
 	"errors"
 	"os"
-	"github.com/pelletier/go-toml/v2"
+	"path"
+	"path/filepath"
+
 	"github.com/charmbracelet/log"
+	"github.com/pelletier/go-toml/v2"
 )
 
 type MprisSection struct {
@@ -28,14 +31,20 @@ var programConfig = &ProgramConfig{
 }
 
 func ParseConfigFile() (error) {
-	_, err := os.Stat(CONFIG_FILE)
+	configFilePath := CONFIG_FILE
+	executablePath, err := os.Executable()
+	if err == nil {
+		configFilePath = path.Join(filepath.Dir(executablePath), CONFIG_FILE)
+	}
+	
+	_, err = os.Stat(configFilePath)
 	if err != nil && errors.Is(err, os.ErrNotExist) {
 		log.Info("creating a default config file", "reason", err)
 		defaults, err := toml.Marshal(programConfig)
 		if err != nil {
 			return err
 		}
-		err = os.WriteFile(CONFIG_FILE, defaults, 0664)
+		err = os.WriteFile(configFilePath, defaults, 0664)
 		if err != nil {
 			return err
 		}
@@ -43,7 +52,7 @@ func ParseConfigFile() (error) {
 	} else if err != nil {
 		return err
 	}
-	bytes, err := os.ReadFile(CONFIG_FILE)
+	bytes, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return err
 	}
