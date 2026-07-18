@@ -4,10 +4,12 @@ package itunes
 
 import (
 	"errors"
+	"tunesbus/internal/olejunk"
 
-	"github.com/charmbracelet/log"
 	"syscall"
 	"unsafe"
+
+	"github.com/charmbracelet/log"
 
 	"github.com/go-ole/go-ole"
 	"github.com/go-ole/go-ole/oleutil"
@@ -86,7 +88,7 @@ func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GU
 			return nil
 		}
 		first := (*ole.VARIANT)(*(*unsafe.Pointer)(unsafe.Pointer(&dp.rgvarg)))
-		track, err := getCOMObjectFromVariant[IiTrack](first, IID_IiTrack)
+		track, err := olejunk.GetCOMObjectFromVariant[IiTrack](first, IID_IiTrack)
 		if err != nil {
 			return nil
 		}
@@ -157,15 +159,15 @@ func connectObject(disp *ole.IDispatch, iid *ole.GUID, idisp any) (point *ole.IC
 }
 
 type COMEventSink struct {
-	dispatcher      *ole.IDispatch
+	disp      *ole.IDispatch
 	callbackHandler COMEventCallback
 	connectionPoint *ole.IConnectionPoint
 	cookie          uint32
 }
 
-func NewCOMEventSink(dispatcher *ole.IDispatch, handler TunesEventHandler) (*COMEventSink, error) {
+func NewCOMEventSink(disp *ole.IDispatch, handler TunesEventHandler) (*COMEventSink, error) {
 	return &COMEventSink{
-		dispatcher: dispatcher,
+		disp: disp,
 		callbackHandler: COMEventCallback{
 			handler: handler,
 		},
@@ -187,7 +189,7 @@ func NewTunesDispatch() (*ole.IDispatch, error) {
 	return iTunesDispatch, err
 }
 
-func (c *COMEventSink) disconnectObject() {
+func (c *COMEventSink) DisconnectObject() {
 	if c.connectionPoint == nil {
 		return
 	}
@@ -201,7 +203,7 @@ func (c *COMEventSink) disconnectObject() {
 	c.connectionPoint = nil
 }
 
-func (c *COMEventSink) ListenEvents(done chan struct{}) error {
+func (c *COMEventSink) ListenEvents() error {
 	log.Info("setting the event receiver up")
 	defer ole.CoUninitialize()
 	iid, err := ole.CLSIDFromString(IID_IiTunesEvents)
@@ -222,15 +224,14 @@ func (c *COMEventSink) ListenEvents(done chan struct{}) error {
 			GetIDsOfNames:    syscall.NewCallback(getIDsOfNames),
 			Invoke:           syscall.NewCallback(c.callbackHandler.invoke),
 		},
-		host: c.dispatcher,
+		host: c.disp,
 	}
 
-	c.connectionPoint, c.cookie, err = connectObject(c.dispatcher, iid, (*ole.IUnknown)(unsafe.Pointer(receiver)))
+	c.connectionPoint, c.cookie, err = connectObject(c.disp, iid, (*ole.IUnknown)(unsafe.Pointer(receiver)))
 	if err != nil {
 		log.Error("failed to connect the eventReceiver object", err)
 		return err
 	}
-	defer c.disconnectObject()
 
 	var msg ole.Msg
 	for {

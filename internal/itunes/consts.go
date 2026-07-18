@@ -16,13 +16,6 @@ const (
 )
 
 const (
-	ITPlayerStateStopped     = 0
-	ITPlayerStatePlaying     = 1
-	ITPlayerStateFastForward = 2
-	ITPlayerStateRewind      = 3
-)
-
-const (
 	ITPlayButtonStatePlayDisabled  = 0
 	ITPlayButtonStatePlayEnabled   = 1
 	ITPlayButtonStatePauseEnabled  = 2
