@@ -21,7 +21,7 @@ git clone --recurse-submodules https://codeberg.org/Nightdavisao/tunesbus.git
 
 Fortunately, you can cross-compile for Windows/Wine (the intended target) without any issues:
 ```bash
-GOOS=windows GOARCH=amd64 go build -o tunescomtest.exe cmd/main.go 
+GOOS=windows GOARCH=amd64 go build -o tunesbus.exe ./cmd/
 ```
 Note that this program is only supposed to be ran on a Wine version that supports **AF_UNIX sockets** (the latest wine-staging should do it)
 
