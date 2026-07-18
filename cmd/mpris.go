@@ -47,7 +47,11 @@ func (r BusRoot) HasTrackList() (bool, error) {
 }
 
 func (r BusRoot) Identity() (string, error) {
-	return "iTunes", nil
+	return r.state.config.MPRIS.Identity, nil
+}
+
+func (r BusRoot) DesktopEntry() (string, error) {
+	return r.state.config.MPRIS.DesktopEntry, nil
 }
 
 func (r BusRoot) SupportedUriSchemes() ([]string, error) {

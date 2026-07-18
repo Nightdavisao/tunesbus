@@ -28,8 +28,7 @@ type WeakTrackArtworkCache struct {
 	store weakmap.Map[int64, string]
 }
 
-type Config struct {
-	identity        *string
+type CmdArguments struct {
 	diagnosticsOnly *bool
 }
 
@@ -40,7 +39,8 @@ type OnceGroup struct {
 }
 
 type MainState struct {
-	config    Config
+	arguments CmdArguments
+	config    *ProgramConfig
 	tunesDisp *ole.IDispatch
 
 	mux  sync.RWMutex
@@ -135,9 +135,7 @@ func (state *MainState) startTicker() {
 func (state *MainState) ParseArgs() {
 	debugModePtr := flag.Bool("debug", false, "Enable debug logging")
 
-	state.config.identity = flag.String("identity", "iTunes", "Custom identity for the MPRIS server\n"+
-		"Tip: Set this to \"cider\" in all lowercase (or use some other whitelisted identity) if you want to make Music Presence pick up the player.")
-	state.config.diagnosticsOnly = flag.Bool("diagnostics", false, "Show diagnostics and quit.")
+	state.arguments.diagnosticsOnly = flag.Bool("diagnostics", false, "Show diagnostics and quit.")
 	flag.Parse()
 
 	if *debugModePtr {
@@ -145,6 +143,8 @@ func (state *MainState) ParseArgs() {
 		return
 	}
 }
+
+const TITLE_WINDOW = "tunesbus"
 
 func main() {
 	runtime.LockOSThread()
@@ -164,17 +164,24 @@ func main() {
 		<-sigs
 		state.QuitSafely(nil, "")
 	}()
+
+	var err error
+	
+	err = ParseConfigFile()
+	if err != nil {
+		log.Error("failed to parse config file, will use defaults", "error", err)
+	}
+	state.config = programConfig
 	state.ParseArgs()
 
-	const title = "tunesbus"
 
-	if *state.config.diagnosticsOnly {
+	if *state.arguments.diagnosticsOnly {
 		text := ""
 
 		wineVersion, err := wine.GetWineVersion()
 		if err != nil {
 			wine.ErrorMessageBox(
-				title,
+				TITLE_WINDOW,
 				fmt.Sprintf("Error on getting Wine version: %v\n", err),
 			)
 			return
@@ -184,7 +191,7 @@ func main() {
 		wineBuild, err := wine.GetWineBuild()
 		if err != nil {
 			wine.ErrorMessageBox(
-				title,
+				TITLE_WINDOW,
 				fmt.Sprintf("Error on getting Wine build ID: %v\n", err),
 			)
 			return
@@ -194,7 +201,7 @@ func main() {
 		tmpDir, err := wine.UnixTmpDirAsDosPath()
 		if err != nil {
 			wine.ErrorMessageBox(
-				title,
+				TITLE_WINDOW,
 				fmt.Sprintf("Error on getting temporary Unix directory: %v\n", err),
 			)
 			return
@@ -202,11 +209,10 @@ func main() {
 		text = text + fmt.Sprintf("Temporary Unix directory (as DOS): %s\n", tmpDir)
 		text = text + fmt.Sprintf("WINEPREFIX env: %s\n", wine.GetWinePrefix())
 
-		wine.InfoMessageBox(title, text)
+		wine.InfoMessageBox(TITLE_WINDOW, text)
 		return
 	}
 
-	var err error
 
 	state.tunesDisp, err = itunes.NewTunesDispatch()
 	if err != nil {
@@ -222,7 +228,7 @@ func main() {
 		state: state,
 	}
 
-	state.server = server.NewServer(*state.config.identity, busRoot, &busPlayer)
+	state.server = server.NewServer(state.config.MPRIS.BusNameSuffix, busRoot, &busPlayer)
 	state.mprisHandler = events.NewEventHandler(state.server)
 
 	handler := &tunesEventHandler{
