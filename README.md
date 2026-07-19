@@ -4,8 +4,6 @@ An experimental MPRIS integration for iTunes (running on Wine, Linux)
 [Main repository](https://codeberg.org/Nightdavisao/tunesbus)  
 [Releases](https://codeberg.org/Nightdavisao/tunesbus/releases)  
 
-Pull requests are disabled on the GitHub mirror. I'm lazy to set up something to pull commits from it and this kinda demotivates the average slop machine to "contribute" to this project, anyway. 
-
 ## How to run
 First, open iTunes. Then, open this program. This should be all.  
 You can also just open this program and it'll open iTunes anyway. That's just how Windows' OLE/COM works, I didn't write any code to do this. :)
