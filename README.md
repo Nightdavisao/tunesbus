@@ -1,8 +1,11 @@
 # tunesbus
 An experimental MPRIS integration for iTunes (running on Wine, Linux)
 
-[Main repository](https://codeberg.org/Nightdavisao/tunesbus)  
+---
 [Releases](https://codeberg.org/Nightdavisao/tunesbus/releases)  
+---
+[Codeberg repository](https://codeberg.org/Nightdavisao/tunesbus)  
+[GitHub mirror](https://github.com/Nightdavisao/tunesbus)  
 
 ## How to run
 First, open iTunes. Then, open this program. This should be all.  
