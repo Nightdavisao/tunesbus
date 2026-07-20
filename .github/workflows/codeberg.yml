@@ -1,0 +1,23 @@
+name: Push to Codeberg
+
+on:
+  push:
+    branches:
+      - '*'
+  workflow_dispatch:
+
+jobs:
+  push_to_codeberg:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - name: Push to Codeberg
+        uses: yesolutions/mirror-action@master
+        with:
+          REMOTE: 'https://codeberg.com/Nightdavisao/tunesbus.git'
+          GIT_USERNAME: Nightdavisao
+          GIT_PASSWORD: ${{ secrets.CODEBERG_PASSWORD }} 
