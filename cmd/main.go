@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -147,8 +146,6 @@ func (state *MainState) ParseArgs() {
 const TITLE_WINDOW = "tunesbus"
 
 func main() {
-	runtime.LockOSThread()
-
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 
