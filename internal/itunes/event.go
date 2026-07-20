@@ -4,7 +4,8 @@ package itunes
 
 import (
 	"errors"
-	"tunesbus/internal/olejunk"
+	"runtime"
+	olejunk "tunesbus/internal/olejunk"
 
 	"syscall"
 	"unsafe"
@@ -52,13 +53,19 @@ func queryInterface(this *ole.IUnknown, iid *ole.GUID, punk **ole.IUnknown) uint
 }
 
 func addRef(this *ole.IUnknown) uintptr {
-	pthis := (*eventReceiver)(unsafe.Pointer(this))
+	ptr := unsafe.Pointer(this)
+	olejunk.PtrCache.Add(ptr)
+	
+	pthis := (*eventReceiver)(ptr)
 	pthis.ref++
 	return uintptr(pthis.ref)
 }
 
 func release(this *ole.IUnknown) uintptr {
-	pthis := (*eventReceiver)(unsafe.Pointer(this))
+	ptr := unsafe.Pointer(this)
+	olejunk.PtrCache.Add(ptr)
+	
+	pthis := (*eventReceiver)(ptr)
 	pthis.ref--
 	return uintptr(pthis.ref)
 }
@@ -80,6 +87,8 @@ func getTypeInfo(ptypeif *uintptr) uintptr {
 }
 
 func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GUID, lcid int, flags int16, dispparams *ole.DISPPARAMS, result *ole.VARIANT, pexcepinfo *ole.EXCEPINFO, nerr *uint) uintptr {
+	ptr := unsafe.Pointer(dispparams)
+	olejunk.PtrCache.Add(ptr)
 	dp := (*dispParams)(unsafe.Pointer(dispparams))
 	log.Debug("disp", dp, dispid)
 
@@ -87,7 +96,10 @@ func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GU
 		if dp.cArgs == 0 {
 			return nil
 		}
-		first := (*ole.VARIANT)(*(*unsafe.Pointer)(unsafe.Pointer(&dp.rgvarg)))
+		ptr := unsafe.Pointer(&dp.rgvarg)
+		olejunk.PtrCache.Add(ptr)
+		
+		first := (*ole.VARIANT)(*(*unsafe.Pointer)(ptr))
 		track, err := olejunk.GetCOMObjectFromVariant[IiTrack](first, IID_IiTrack)
 		if err != nil {
 			return nil
@@ -99,7 +111,10 @@ func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GU
 		if dp.cArgs == 0 {
 			return nil
 		}
-		first := (*ole.VARIANT)(*(*unsafe.Pointer)(unsafe.Pointer(&dp.rgvarg)))
+		ptr := unsafe.Pointer(&dp.rgvarg)
+		olejunk.PtrCache.Add(ptr)
+		
+		first := (*ole.VARIANT)(*(*unsafe.Pointer)(ptr))
 		switch first.VT {
 		case ole.VT_I4, ole.VT_I8, ole.VT_INT:
 			return &first.Val
@@ -204,6 +219,8 @@ func (c *COMEventSink) DisconnectObject() {
 }
 
 func (c *COMEventSink) ListenEvents() error {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	log.Info("setting the event receiver up")
 	defer ole.CoUninitialize()
 	iid, err := ole.CLSIDFromString(IID_IiTunesEvents)
@@ -226,8 +243,10 @@ func (c *COMEventSink) ListenEvents() error {
 		},
 		host: c.disp,
 	}
+	ptr := unsafe.Pointer(receiver)
+	olejunk.PtrCache.Add(ptr)
 
-	c.connectionPoint, c.cookie, err = connectObject(c.disp, iid, (*ole.IUnknown)(unsafe.Pointer(receiver)))
+	c.connectionPoint, c.cookie, err = connectObject(c.disp, iid, (*ole.IUnknown)(ptr))
 	if err != nil {
 		log.Error("failed to connect the eventReceiver object", err)
 		return err
