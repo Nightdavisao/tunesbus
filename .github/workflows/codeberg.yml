@@ -18,6 +18,6 @@ jobs:
       - name: Push to Codeberg
         uses: yesolutions/mirror-action@master
         with:
-          REMOTE: 'https://codeberg.com/Nightdavisao/tunesbus.git'
+          REMOTE: 'https://codeberg.org/Nightdavisao/tunesbus.git'
           GIT_USERNAME: Nightdavisao
           GIT_PASSWORD: ${{ secrets.CODEBERG_PASSWORD }} 
