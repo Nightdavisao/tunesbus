@@ -209,6 +209,7 @@ func NewTunesDispatch(releaser *olejunk.OleReleaser) (*ole.IDispatch, error) {
 		log.Fatalf("failed to create object: %v", err)
 		return nil, err
 	}
+	releaser.Add(unknown)
 
 	iTunesDispatch, err := unknown.QueryInterface(ole.IID_IDispatch)
 	releaser.Add(&iTunesDispatch.IUnknown)
@@ -255,10 +256,10 @@ func (c *COMEventSink) ListenEvents() error {
 		},
 		host: c.disp,
 	}
-	ptr := unsafe.Pointer(receiver)
-	olejunk.PtrCache.Add(ptr)
+	ptr := (*ole.IUnknown)(unsafe.Pointer(receiver))
+	c.releaser.Add(ptr)
 
-	c.connectionPoint, c.cookie, err = connectObject(c.disp, iid, (*ole.IUnknown)(ptr))
+	c.connectionPoint, c.cookie, err = connectObject(c.disp, iid, ptr)
 	if err != nil {
 		log.Error("failed to connect the eventReceiver object", err)
 		return err
