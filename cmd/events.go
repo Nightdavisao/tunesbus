@@ -27,6 +27,11 @@ func (m *tunesEventHandler) OnPlayerPlayEvent(t *itunes.IiTrackData, dispatch *o
 		log.Error("failed to set initial metadata", err)
 		return
 	}
+	err = setCoverArt(int32(t.TrackID), dispatch, m.state)
+	if err != nil {
+		log.Warn("failed to set cover art", "error", err)
+	}
+	
 	changes := m.state.refreshPlaybackState(true)
 
 	if !m.state.waitForMprisReady(2 * time.Second) {
@@ -41,9 +46,14 @@ func (m *tunesEventHandler) OnPlayerStopEvent(t *itunes.IiTrackData, dispatch *o
 	log.Debug("received OnPlayerStopEvent", "iitrack", t)
 	err := setPlayerMetadata(t, m.state)
 	if err != nil {
-		log.Error("failed to set initial metadata", err)
+		log.Error("failed to set initial metadata", "error", err)
 		return
 	}
+	err = setCoverArt(int32(t.TrackID), dispatch, m.state)
+	if err != nil {
+		log.Warn("failed to set cover art", "error", err)
+	}
+	
 	m.state.mux.Lock()
 	m.state.playbackState.playerState = itunes.ITPlayerStateStopped
 	m.state.playbackState.hasPlayerState = true

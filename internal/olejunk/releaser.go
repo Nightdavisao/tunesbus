@@ -19,8 +19,8 @@ func NewOleReleaser() *OleReleaser {
 }
 
 func (r *OleReleaser) Add(obj *ole.IUnknown) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	if obj == nil {
 		log.Warn("OleReleaser: attempted to add nil object")
@@ -30,7 +30,7 @@ func (r *OleReleaser) Add(obj *ole.IUnknown) {
 		log.Debug("OleReleaser: object already tracked, skipping AddRef", "object", obj)
 		return
 	}
-	log.Debug("OleReleaser: adding object", "object", obj)
+	log.Debug("OleReleaser: adding object", "object", obj, "length", r.Length())
 	obj.AddRef()
 	r.objects[obj] = struct{}{}
 }
