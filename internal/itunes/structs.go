@@ -9,6 +9,8 @@ type TunesEventHandler interface {
 	OnQuittingEvent()
 	OnAboutToPromptUserToQuitEvent()
 	OnSoundVolumeChangedEvent(*int64)
+	OnCOMCallsEnabledEvent()
+	OnCOMCallsDisabledEvent()
 }
 
 type IiTrackData struct {

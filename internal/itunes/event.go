@@ -140,6 +140,10 @@ func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GU
 		ev.handler.OnAboutToPromptUserToQuitEvent()
 	case OnSoundVolumeChangedEventNum:
 		ev.handler.OnSoundVolumeChangedEvent(getInteger())
+	case OnCOMCallsEnabledEventNum:
+		ev.handler.OnCOMCallsEnabledEvent()
+	case OnCOMCallsDisabledEventNum:
+		ev.handler.OnCOMCallsDisabledEvent()
 	}
 
 	return ole.S_OK
@@ -148,7 +152,7 @@ func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GU
 func connectObject(disp *ole.IDispatch, iid *ole.GUID, idisp any) (point *ole.IConnectionPoint, cookie uint32, err error) {
 	releaser := olejunk.NewOleReleaser()
 	defer releaser.Release()
-	
+
 	unknown, err := disp.QueryInterface(ole.IID_IConnectionPointContainer)
 	releaser.Add(&unknown.IUnknown)
 	if err != nil {
@@ -158,9 +162,9 @@ func connectObject(disp *ole.IDispatch, iid *ole.GUID, idisp any) (point *ole.IC
 
 	container := (*ole.IConnectionPointContainer)(unsafe.Pointer(unknown))
 	releaser.Add(&container.IUnknown)
-	
+
 	log.Debug("got the connection point container")
-	
+
 	point = nil
 	err = container.FindConnectionPoint(iid, &point)
 	if err != nil {
@@ -168,7 +172,7 @@ func connectObject(disp *ole.IDispatch, iid *ole.GUID, idisp any) (point *ole.IC
 		return
 	}
 	releaser.Add(&point.IUnknown)
-	
+
 	if edisp, ok := idisp.(*ole.IUnknown); ok {
 		cookie, err = point.Advise(edisp)
 		if err != nil {
@@ -187,13 +191,12 @@ type COMEventSink struct {
 	cookie          uint32
 }
 
-
 func NewCOMEventSink(disp *ole.IDispatch, handler TunesEventHandler, releaser *olejunk.OleReleaser) (*COMEventSink, error) {
 	eventSink := COMEventSink{
 		disp:     disp,
 		releaser: releaser,
 		callbackHandler: COMEventCallback{
-			handler:  handler,
+			handler: handler,
 		},
 	}
 
@@ -233,7 +236,7 @@ func (c *COMEventSink) DisconnectObject() {
 func (c *COMEventSink) ListenEvents() error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	
+
 	log.Info("setting the event receiver up")
 	defer ole.CoUninitialize()
 	iid, err := ole.CLSIDFromString(IID_IiTunesEvents)

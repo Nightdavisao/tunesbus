@@ -13,6 +13,8 @@ const (
 	OnQuittingEventNum                  = 0x00000008
 	OnAboutToPromptUserToQuitEventNum   = 0x00000009
 	OnSoundVolumeChangedEventNum        = 0x0000000a
+	OnCOMCallsDisabledEventNum          = 0x00000006
+	OnCOMCallsEnabledEventNum           = 0x00000007
 )
 
 const (

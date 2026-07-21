@@ -98,3 +98,21 @@ func (m *tunesEventHandler) OnSoundVolumeChangedEvent(val *int64) {
 	m.state.mux.Unlock()
 	m.handler.Player.OnVolume()
 }
+
+func (m *tunesEventHandler) OnCOMCallsEnabledEvent() {
+	m.state.mux.Lock()
+	defer m.state.mux.Unlock()
+
+	log.Debug("received OnCOMCallsEnabledEvent")
+	m.state.isBeingDeferred = false
+	log.Debug("not longer being deferred", "isBeingDeferred", m.state.isBeingDeferred)
+}
+
+func (m *tunesEventHandler) OnCOMCallsDisabledEvent() {
+	m.state.mux.Lock()
+	defer m.state.mux.Unlock()
+
+	log.Debug("received OnCOMCallsDisabledEvent")
+	m.state.isBeingDeferred = true
+	log.Debug("being deferred", "isBeingDeferred", m.state.isBeingDeferred)
+}
