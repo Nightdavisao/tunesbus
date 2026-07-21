@@ -16,7 +16,10 @@ import (
 	"github.com/go-ole/go-ole/oleutil"
 )
 
-func GetCurrentTrack(disp *ole.IDispatch, releaser *olejunk.OleReleaser) (*IiTrackData, error) {
+func GetCurrentTrack(disp *ole.IDispatch) (*IiTrackData, error) {
+	releaser := olejunk.NewOleReleaser()
+	defer releaser.Release()
+	
 	if disp != nil {
 		trackProp, err := oleutil.GetProperty(disp, "CurrentTrack")
 		if err != nil {
@@ -35,7 +38,7 @@ func GetCurrentTrack(disp *ole.IDispatch, releaser *olejunk.OleReleaser) (*IiTra
 	return nil, errors.New("disp is not ready")
 }
 
-// only used for getting properties such as volume and player position. this does not have an idispatch instance
+// only used for getting properties such as volume and player position
 func GetCurrentTunes(disp *ole.IDispatch) (*IiTunes, error) {
 	if disp == nil {
 		return nil, errors.New("disp is not ready")
@@ -198,7 +201,7 @@ func GetPlayerButtonsState(disp *ole.IDispatch) (prevEnabled bool, state int32, 
 
 func SafeGetCurrentPlaylist(tunesDisp *ole.IDispatch, releaser *olejunk.OleReleaser) (*ole.IDispatch, error) {
 	// safety check
-	track, err := GetCurrentTrack(tunesDisp, releaser)
+	track, err := GetCurrentTrack(tunesDisp)
 	if err != nil {
 		return nil, err
 	}

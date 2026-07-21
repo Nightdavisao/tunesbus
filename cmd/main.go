@@ -153,7 +153,7 @@ func (state *MainState) ParseArgs() {
 	}
 }
 
-const TITLE_WINDOW = "tunesbus"
+const WINDOW_TITLE = "tunesbus"
 
 var _releaser *olejunk.OleReleaser
 
@@ -191,7 +191,7 @@ func main() {
 		wineVersion, err := wine.GetWineVersion()
 		if err != nil {
 			wine.ErrorMessageBox(
-				TITLE_WINDOW,
+				WINDOW_TITLE,
 				fmt.Sprintf("Error on getting Wine version: %v\n", err),
 			)
 			return
@@ -201,7 +201,7 @@ func main() {
 		wineBuild, err := wine.GetWineBuild()
 		if err != nil {
 			wine.ErrorMessageBox(
-				TITLE_WINDOW,
+				WINDOW_TITLE,
 				fmt.Sprintf("Error on getting Wine build ID: %v\n", err),
 			)
 			return
@@ -211,7 +211,7 @@ func main() {
 		tmpDir, err := wine.UnixTmpDirAsDosPath()
 		if err != nil {
 			wine.ErrorMessageBox(
-				TITLE_WINDOW,
+				WINDOW_TITLE,
 				fmt.Sprintf("Error on getting temporary Unix directory: %v\n", err),
 			)
 			return
@@ -219,7 +219,7 @@ func main() {
 		text = text + fmt.Sprintf("Temporary Unix directory (as DOS): %s\n", tmpDir)
 		text = text + fmt.Sprintf("WINEPREFIX env: %s\n", wine.GetWinePrefix())
 
-		wine.InfoMessageBox(TITLE_WINDOW, text)
+		wine.InfoMessageBox(WINDOW_TITLE, text)
 		return
 	}
 
@@ -285,7 +285,7 @@ func (state *MainState) QuitSafely(err error, message string) {
 
 		if message != "" {
 			log.Error(message, "error", err)
-			wine.ErrorMessageBox("tunesbus", message)
+			wine.ErrorMessageBox(WINDOW_TITLE, message)
 		} else {
 			log.Error("quitting because of critical error", "error", err)
 		}
