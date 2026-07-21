@@ -2,7 +2,7 @@ package olejunk
 
 import (
 	"sync"
-
+	"github.com/charmbracelet/log"
 	"github.com/go-ole/go-ole"
 )
 
@@ -19,6 +19,7 @@ func NewOleReleaser() *OleReleaser {
 
 func (r *OleReleaser) Add(obj *ole.IUnknown) {
 	r.mu.Lock()
+	log.Debug("OleReleaser: adding object", "object", obj)
 	if obj != nil {
 		obj.AddRef()
 		r.objects = append(r.objects, obj)
@@ -29,10 +30,12 @@ func (r *OleReleaser) Add(obj *ole.IUnknown) {
 func (r *OleReleaser) Release() {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-
+	log.Debug("OleReleaser: releasing all objects", "length", len(r.objects))
 	for _, obj := range r.objects {
+		log.Debug("OleReleaser: object to be released", "object", obj)
 		if obj != nil {
-			obj.Release()
+			refCount := obj.Release()
+			log.Debug("OleReleaser: released object", "ref_count", refCount)
 		}
 	}
 	r.objects = nil
