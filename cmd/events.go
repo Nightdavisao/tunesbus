@@ -19,6 +19,7 @@ type tunesEventHandler struct {
 
 func (m *tunesEventHandler) OnPlayerPlayEvent(t *itunes.IiTrackData, dispatch *ole.IDispatch) {
 	log.Debug("received OnPlayerPlayEvent", t)
+	m.state.isBeingDeferred = false
 	m.state.ensureMprisStarted()
 
 	err := setPlayerMetadata(t, m.state)
@@ -26,7 +27,6 @@ func (m *tunesEventHandler) OnPlayerPlayEvent(t *itunes.IiTrackData, dispatch *o
 		log.Error("failed to set initial metadata", err)
 		return
 	}
-
 	changes := m.state.refreshPlaybackState(true)
 
 	if !m.state.waitForMprisReady(2 * time.Second) {
@@ -47,6 +47,7 @@ func (m *tunesEventHandler) OnPlayerStopEvent(t *itunes.IiTrackData, dispatch *o
 	m.state.mux.Lock()
 	m.state.playbackState.playerState = itunes.ITPlayerStateStopped
 	m.state.playbackState.hasPlayerState = true
+	m.state.isBeingDeferred = true
 	m.state.mux.Unlock()
 	m.handler.Player.OnTitle()
 	m.handler.Player.OnEnded()
@@ -69,13 +70,8 @@ func (m *tunesEventHandler) OnQuittingEvent() {
 }
 
 func (m *tunesEventHandler) OnAboutToPromptUserToQuitEvent() {
-	log.Debug("received OnAboutToPromptUserToQuitEvent")
+	log.Debug("received OnAboutToPromptUserToQuitEvent", "releaserObjLen", _releaser.Length())
 	m.state.QuitSafely(nil, "")
-	// be evil
-	err := killTunes()
-	if err != nil {
-		log.Error("failed to kill iTunes.exe via taskkill", "err", err)
-	}
 }
 
 func (m *tunesEventHandler) OnSoundVolumeChangedEvent(val *int64) {

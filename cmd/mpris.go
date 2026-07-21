@@ -154,7 +154,7 @@ func (m *BusPlayer) SetRate(rate float64) error {
 
 func (m *BusPlayer) Metadata() (types.Metadata, error) {
 	if m.state.currentMetadata != nil {
-		log.Debug("Metadata called", *m.state.currentMetadata)
+		log.Debug("Metadata called", "metadata", *m.state.currentMetadata)
 		if m.state.currentMetadata.TrackId.IsValid() {
 			return *m.state.currentMetadata, nil
 		}

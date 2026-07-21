@@ -22,7 +22,6 @@ func (r *OleReleaser) Add(obj *ole.IUnknown) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	log.Debug("OleReleaser: adding object", "object", obj)
 	if obj == nil {
 		log.Warn("OleReleaser: attempted to add nil object")
 		return
@@ -31,6 +30,7 @@ func (r *OleReleaser) Add(obj *ole.IUnknown) {
 		log.Debug("OleReleaser: object already tracked, skipping AddRef", "object", obj)
 		return
 	}
+	log.Debug("OleReleaser: adding object", "object", obj)
 	obj.AddRef()
 	r.objects[obj] = struct{}{}
 }
@@ -46,4 +46,8 @@ func (r *OleReleaser) Release() {
 		log.Debug("OleReleaser: released object", "ref_count", refCount)
 	}
 	r.objects = make(map[*ole.IUnknown]struct{})
+}
+
+func (r *OleReleaser) Length() int {
+	return len(r.objects)
 }

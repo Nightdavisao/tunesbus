@@ -48,6 +48,8 @@ type MainState struct {
 
 	currentMetadata *types.Metadata
 	playbackState   PlaybackState
+	// whether iTunes is deferring COM events... or if the player is paused
+	isBeingDeferred bool
 
 	server       *server.Server
 	mprisHandler *events.EventHandler
@@ -123,9 +125,15 @@ func (state *MainState) startTicker() {
 			if !state.waitForMprisReady(0) {
 				continue
 			}
+			if state.isBeingDeferred {
+				continue
+			}
 			state.emitPlaybackChanges(state.refreshPlaybackState(false))
 		case <-optionsTicker.C:
 			if !state.waitForMprisReady(0) {
+				continue
+			}
+			if state.isBeingDeferred {
 				continue
 			}
 			state.emitPlaybackChanges(state.refreshPlaybackState(true))
@@ -157,6 +165,7 @@ func main() {
 	state := &MainState{
 		ticker:          time.NewTicker(500 * time.Millisecond),
 		currentMetadata: &types.Metadata{},
+		isBeingDeferred: false,
 		artworkCache: WeakTrackArtworkCache{
 			store: weakmap.Map[int64, string]{},
 		},
@@ -251,7 +260,7 @@ func main() {
 
 func (state *MainState) QuitSafely(err error, message string) {
 	log.Debug("QuitSafety called", "error", err, "message", message)
-	defer _releaser.Release()
+	_releaser.Release()
 	
 	if state.server.Conn != nil {
 		err := state.server.Stop()
