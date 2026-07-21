@@ -3,24 +3,23 @@ package itunes
 import "github.com/go-ole/go-ole"
 
 type TunesEventHandler interface {
-    OnPlayerPlayEvent(*IiTrack)
-    OnPlayerStopEvent(*IiTrack)
-    OnPlayerPlayingTrackChangedEvent(*IiTrack)
-    OnQuittingEvent()
-    OnAboutToPromptUserToQuitEvent()
-    OnSoundVolumeChangedEvent(*int64)
+	OnPlayerPlayEvent(*IiTrackData, *ole.IDispatch)
+	OnPlayerStopEvent(*IiTrackData, *ole.IDispatch)
+	OnPlayerPlayingTrackChangedEvent(*IiTrackData, *ole.IDispatch)
+	OnQuittingEvent()
+	OnAboutToPromptUserToQuitEvent()
+	OnSoundVolumeChangedEvent(*int64)
 }
 
-type IiTrack struct {
-	IDispatch *ole.IDispatch `com:"self"`
-	Name string
-	Artist string
-	Album string
-	Duration int64
-	DiscNumber int64
+type IiTrackData struct {
+	Name        string
+	Artist      string
+	Album       string
+	Duration    int64
+	DiscNumber  int64
 	TrackNumber int64
-	TrackCount int64
-	TrackID int64 `com:"trackID"`
+	TrackCount  int64
+	TrackID     int64 `com:"trackID"`
 }
 
 type ArtworkFormat int32
@@ -51,8 +50,7 @@ const (
 
 // float = int64
 type IiTunes struct {
-	IDispatch *ole.IDispatch `com:"self"`
-	CanSetShuffle bool
+	CanSetShuffle    bool
 	CanSetSongRepeat bool
 	//CurrentTrack IiTrack
 	// [id(0x60020021), propget, helpstring("Returns the player's position within the currently playing track in seconds.")]
@@ -63,11 +61,11 @@ type IiTunes struct {
 	PlayerPosition int32
 	// Player position in milliseconds
 	PlayerPositionMS int32
-	PlayerState ITPlayerState
-	SoundVolume int32
-	Rating int64
-	Time string
-	TrackID int64 `com:"trackID"`
+	PlayerState      ITPlayerState
+	SoundVolume      int32
+	Rating           int64
+	Time             string
+	TrackID          int64 `com:"trackID"`
 	// BackTrack, NextTrack, Resume, Play, PlayPause
 }
 

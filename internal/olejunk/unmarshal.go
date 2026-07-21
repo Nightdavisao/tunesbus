@@ -21,19 +21,11 @@ func UnmarshalCOM(disp *ole.IDispatch, dst any) error {
 		field := rt.Field(i)
 		fv := rv.Field(i)
 		tag, ok := field.Tag.Lookup("com")
-
-		if ok && tag == "self" {
-			if fv.Type() != reflect.TypeOf(disp) {
-				return fmt.Errorf("field %q tagged com:\"self\" must be *ole.IDispatch", field.Name)
-			}
-			disp.AddRef()
-			fv.Set(reflect.ValueOf(disp))
-			continue
-		}
+		
 		if ok && tag == "-" {
 			continue
 		}
-		
+
 		propName := field.Name
 		if ok && tag != "" {
 			propName = tag
@@ -72,16 +64,24 @@ func assign(fv reflect.Value, variant *ole.VARIANT) error {
 	return fmt.Errorf("cannot assign COM value of type %s to field of type %s", val.Type(), fv.Type())
 }
 
-func GetCOMObjectFromVariant[T any](object *ole.VARIANT, iid string) (*T, error) {
+func GetCOMObjectFromVariant[T any](object *ole.VARIANT, iid string, releaser *OleReleaser) (*T, *ole.IDispatch, error) {
 	if object != nil {
-		return GetCOMObject[T](object.ToIDispatch(), iid)
+		disp := object.ToIDispatch()
+		obj, err := GetCOMObject[T](disp, iid, releaser)
+		if err != nil {
+			return nil, nil, err
+		}
+		return obj, disp, nil
 	}
-	return nil, errors.New("object is nil")
+	return nil, nil, errors.New("object is nil")
 }
 
-func GetCOMObject[T any](iDispatch *ole.IDispatch, iid string) (*T, error) {
+func GetCOMObject[T any](iDispatch *ole.IDispatch, iid string, releaser *OleReleaser) (*T, error) {
 	if iDispatch == nil {
 		return nil, errors.New("iDispatch is nil")
+	}
+	if releaser != nil {
+		releaser.Add(&iDispatch.IUnknown)
 	}
 	
 	guid := ole.NewGUID(iid)
@@ -89,11 +89,13 @@ func GetCOMObject[T any](iDispatch *ole.IDispatch, iid string) (*T, error) {
 		return nil, errors.New("guid is nil")
 	}
 	
-	disp, err := iDispatch.QueryInterface(guid); if err != nil {
+	disp, err := iDispatch.QueryInterface(guid)
+	if err != nil {
 		return nil, fmt.Errorf("query interface %s: %w", iid, err)
 	}
-	disp.AddRef()
-	defer disp.Release()
+	if releaser != nil {
+		releaser.Add(&disp.IUnknown)
+	}
 
 	var result T
 	if err := UnmarshalCOM(disp, &result); err != nil {

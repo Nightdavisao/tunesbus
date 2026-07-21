@@ -7,6 +7,7 @@ import (
 	"tunesbus/internal/itunes"
 
 	"github.com/charmbracelet/log"
+	"github.com/go-ole/go-ole"
 
 	"github.com/quarckster/go-mpris-server/pkg/events"
 )
@@ -16,7 +17,7 @@ type tunesEventHandler struct {
 	handler *events.EventHandler
 }
 
-func (m *tunesEventHandler) OnPlayerPlayEvent(t *itunes.IiTrack) {
+func (m *tunesEventHandler) OnPlayerPlayEvent(t *itunes.IiTrackData, dispatch *ole.IDispatch) {
 	log.Debug("received OnPlayerPlayEvent", t)
 
 	err := setPlayerMetadata(t, m.state)
@@ -27,7 +28,6 @@ func (m *tunesEventHandler) OnPlayerPlayEvent(t *itunes.IiTrack) {
 
 	changes := m.state.refreshPlaybackState(true)
 
-	m.state.ensureMprisStarted()
 	if !m.state.waitForMprisReady(2 * time.Second) {
 		log.Warn("MPRIS server is not ready yet, skipping play emit")
 		return
@@ -37,8 +37,8 @@ func (m *tunesEventHandler) OnPlayerPlayEvent(t *itunes.IiTrack) {
 	m.state.emitPlaybackChanges(changes)
 }
 
-func (m *tunesEventHandler) OnPlayerStopEvent(t *itunes.IiTrack) {
-	log.Debug("received OnPlayerStopEvent", t)
+func (m *tunesEventHandler) OnPlayerStopEvent(t *itunes.IiTrackData, dispatch *ole.IDispatch) {
+	log.Debug("received OnPlayerStopEvent", "iitrack", t)
 	err := setPlayerMetadata(t, m.state)
 	if err != nil {
 		log.Error("failed to set initial metadata", err)
@@ -52,8 +52,8 @@ func (m *tunesEventHandler) OnPlayerStopEvent(t *itunes.IiTrack) {
 	m.handler.Player.OnEnded()
 }
 
-func (m *tunesEventHandler) OnPlayerPlayingTrackChangedEvent(t *itunes.IiTrack) {
-	log.Printf("OnPlayerPlayingTrackChangedEvent: %v", t)
+func (m *tunesEventHandler) OnPlayerPlayingTrackChangedEvent(t *itunes.IiTrackData, dispatch *ole.IDispatch) {
+	log.Debug("OnPlayerPlayingTrackChangedEvent", "iitrack", t)
 	err := setPlayerMetadata(t, m.state)
 	if err != nil {
 		log.Error("failed to set initial metadata", err)

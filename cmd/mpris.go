@@ -5,6 +5,7 @@ package main
 import (
 	"time"
 	"tunesbus/internal/itunes"
+	"tunesbus/internal/olejunk"
 
 	"github.com/charmbracelet/log"
 
@@ -249,15 +250,16 @@ func (m *BusPlayer) Shuffle() (bool, error) {
 }
 
 func (m *BusPlayer) SetShuffle(shuffle bool) error {
-	playlistDispatcher, err := itunes.SafeGetCurrentPlaylist(m.state.tunesDisp)
+	releaser := olejunk.NewOleReleaser()
+	defer releaser.Release()
+	
+	playlistDispatcher, err := itunes.SafeGetCurrentPlaylist(m.state.tunesDisp, releaser)
 	if err != nil {
 		log.Error("failed to get current playlist on setting Shuffle", err)
 		return nil
 	}
 
 	if playlistDispatcher != nil {
-		defer playlistDispatcher.Release()
-
 		result, err := oleutil.PutProperty(playlistDispatcher, "Shuffle", shuffle)
 		if err != nil {
 			log.Error("failed to put shuffle status", "error", err)
@@ -286,7 +288,10 @@ func (m *BusPlayer) LoopStatus() (types.LoopStatus, error) {
 }
 
 func (m *BusPlayer) SetLoopStatus(status types.LoopStatus) error {
-	playlistDispatch, err := itunes.SafeGetCurrentPlaylist(m.state.tunesDisp)
+	releaser := olejunk.NewOleReleaser()
+	defer releaser.Release()
+	
+	playlistDispatch, err := itunes.SafeGetCurrentPlaylist(m.state.tunesDisp, releaser)
 	if err != nil {
 		log.Error("failed to get current playlist on setting Loop", err)
 		return err
@@ -295,7 +300,6 @@ func (m *BusPlayer) SetLoopStatus(status types.LoopStatus) error {
 		log.Debug("no playlist yet")
 		return nil
 	}
-	defer playlistDispatch.Release()
 
 	var mode int32
 	switch status {

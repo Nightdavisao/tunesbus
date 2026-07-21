@@ -24,19 +24,19 @@ const CONFIG_FILE = "config.toml"
 
 var programConfig = &ProgramConfig{
 	MPRIS: MprisSection{
-		Identity: "iTunes",
+		Identity:      "iTunes",
 		BusNameSuffix: "iTunes",
-		DesktopEntry: "iTunes",
+		DesktopEntry:  "iTunes",
 	},
 }
 
-func ParseConfigFile() (error) {
+func ParseConfigFile() error {
 	configFilePath := CONFIG_FILE
 	executablePath, err := os.Executable()
 	if err == nil {
 		configFilePath = path.Join(filepath.Dir(executablePath), CONFIG_FILE)
 	}
-	
+
 	_, err = os.Stat(configFilePath)
 	if err != nil && errors.Is(err, os.ErrNotExist) {
 		log.Info("creating a default config file", "reason", err)

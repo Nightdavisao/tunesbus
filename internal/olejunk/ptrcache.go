@@ -14,19 +14,19 @@ type _PtrCache struct {
 
 var PtrCache _PtrCache
 
-func (me *_PtrCache) Add(ptr unsafe.Pointer) {
-	me.mutex.Lock()
-	defer me.mutex.Unlock()
+func (p *_PtrCache) Add(ptr unsafe.Pointer) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
 
-	if me.cache == nil {
-		me.cache = make(map[unsafe.Pointer]struct{})
+	if p.cache == nil {
+		p.cache = make(map[unsafe.Pointer]struct{})
 	}
-	me.cache[ptr] = struct{}{}
+	p.cache[ptr] = struct{}{}
 }
 
-func (me *_PtrCache) Delete(ptr unsafe.Pointer) {
-	me.mutex.Lock()
-	defer me.mutex.Unlock()
+func (p *_PtrCache) Delete(ptr unsafe.Pointer) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
 
-	delete(me.cache, ptr)
+	delete(p.cache, ptr)
 }

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 	"tunesbus/internal/itunes"
+	"tunesbus/internal/olejunk"
 	"tunesbus/internal/wine"
 
 	"github.com/ammario/weakmap"
@@ -145,7 +146,10 @@ func (state *MainState) ParseArgs() {
 
 const TITLE_WINDOW = "tunesbus"
 
+var _releaser *olejunk.OleReleaser
+
 func main() {
+	_releaser = olejunk.NewOleReleaser()
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 
@@ -163,14 +167,13 @@ func main() {
 	}()
 
 	var err error
-	
+
 	err = ParseConfigFile()
 	if err != nil {
 		log.Error("failed to parse config file, will use defaults", "error", err)
 	}
 	state.config = programConfig
 	state.ParseArgs()
-
 
 	if *state.arguments.diagnosticsOnly {
 		text := ""
@@ -210,8 +213,7 @@ func main() {
 		return
 	}
 
-
-	state.tunesDisp, err = itunes.NewTunesDispatch()
+	state.tunesDisp, err = itunes.NewTunesDispatch(_releaser)
 	if err != nil {
 		state.QuitSafely(err, "failed to initialize dispatcher")
 		return
@@ -233,7 +235,7 @@ func main() {
 		handler: state.mprisHandler,
 	}
 
-	state.comSink, err = itunes.NewCOMEventSink(state.tunesDisp, handler)
+	state.comSink, err = itunes.NewCOMEventSink(state.tunesDisp, handler, _releaser)
 	if err != nil {
 		state.QuitSafely(err, "something failed when setting up the event sink")
 	}
@@ -244,11 +246,11 @@ func main() {
 	if err != nil {
 		state.QuitSafely(err, "failed to listen for COM events")
 	}
-
-	log.Info("the end")
 }
 
 func (state *MainState) QuitSafely(err error, message string) {
+	defer _releaser.Release()
+	
 	if state.server.Conn != nil {
 		err := state.server.Stop()
 		if err != nil {
@@ -280,10 +282,6 @@ func (state *MainState) QuitSafely(err error, message string) {
 	} else {
 		log.Info("now quitting...")
 		defer os.Exit(code)
-	}
-
-	if state.tunesDisp != nil {
-		state.tunesDisp.Release()
 	}
 	state.sync.quitOnce.Do(func() {
 		close(state.quit)

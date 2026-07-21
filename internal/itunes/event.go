@@ -55,7 +55,7 @@ func queryInterface(this *ole.IUnknown, iid *ole.GUID, punk **ole.IUnknown) uint
 func addRef(this *ole.IUnknown) uintptr {
 	ptr := unsafe.Pointer(this)
 	olejunk.PtrCache.Add(ptr)
-	
+
 	pthis := (*eventReceiver)(ptr)
 	pthis.ref++
 	return uintptr(pthis.ref)
@@ -64,7 +64,7 @@ func addRef(this *ole.IUnknown) uintptr {
 func release(this *ole.IUnknown) uintptr {
 	ptr := unsafe.Pointer(this)
 	olejunk.PtrCache.Add(ptr)
-	
+
 	pthis := (*eventReceiver)(ptr)
 	pthis.ref--
 	return uintptr(pthis.ref)
@@ -87,24 +87,27 @@ func getTypeInfo(ptypeif *uintptr) uintptr {
 }
 
 func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GUID, lcid int, flags int16, dispparams *ole.DISPPARAMS, result *ole.VARIANT, pexcepinfo *ole.EXCEPINFO, nerr *uint) uintptr {
+	releaser := olejunk.NewOleReleaser()
+	defer releaser.Release()
+
 	ptr := unsafe.Pointer(dispparams)
 	olejunk.PtrCache.Add(ptr)
 	dp := (*dispParams)(unsafe.Pointer(dispparams))
 	log.Debug("disp", dp, dispid)
 
-	getTrack := func() *IiTrack {
+	getTrack := func() (*IiTrackData, *ole.IDispatch) {
 		if dp.cArgs == 0 {
-			return nil
+			return nil, nil
 		}
 		ptr := unsafe.Pointer(&dp.rgvarg)
 		olejunk.PtrCache.Add(ptr)
-		
+
 		first := (*ole.VARIANT)(*(*unsafe.Pointer)(ptr))
-		track, err := olejunk.GetCOMObjectFromVariant[IiTrack](first, IID_IiTrack)
+		track, dispatch, err := olejunk.GetCOMObjectFromVariant[IiTrackData](first, IID_IiTrack, releaser)
 		if err != nil {
-			return nil
+			return nil, nil
 		}
-		return track
+		return track, dispatch
 	}
 
 	getInteger := func() *int64 {
@@ -113,8 +116,9 @@ func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GU
 		}
 		ptr := unsafe.Pointer(&dp.rgvarg)
 		olejunk.PtrCache.Add(ptr)
-		
+
 		first := (*ole.VARIANT)(*(*unsafe.Pointer)(ptr))
+		releaser.Add(first.ToIUnknown())
 		switch first.VT {
 		case ole.VT_I4, ole.VT_I8, ole.VT_INT:
 			return &first.Val
@@ -142,31 +146,33 @@ func (ev *COMEventCallback) invoke(this *ole.IDispatch, dispid int, riid *ole.GU
 }
 
 func connectObject(disp *ole.IDispatch, iid *ole.GUID, idisp any) (point *ole.IConnectionPoint, cookie uint32, err error) {
+	releaser := olejunk.NewOleReleaser()
+	defer releaser.Release()
+	
 	unknown, err := disp.QueryInterface(ole.IID_IConnectionPointContainer)
-	unknown.AddRef()
+	releaser.Add(&unknown.IUnknown)
 	if err != nil {
 		log.Fatalf("failed to query for interface while connecting to the object: %v", err)
 		return
 	}
 
 	container := (*ole.IConnectionPointContainer)(unsafe.Pointer(unknown))
-	container.AddRef()
+	releaser.Add(&container.IUnknown)
+	
 	log.Debug("got the connection point container")
-	defer container.Release()
-
+	
 	point = nil
 	err = container.FindConnectionPoint(iid, &point)
 	if err != nil {
 		log.Fatalf("find connection point failed: %v", err)
 		return
 	}
-	point.AddRef()
+	releaser.Add(&point.IUnknown)
 	
 	if edisp, ok := idisp.(*ole.IUnknown); ok {
 		cookie, err = point.Advise(edisp)
 		if err != nil {
 			log.Fatalf("advise failed: %v", err)
-			point.Release()
 			return nil, cookie, ole.NewError(ole.E_INVALIDARG)
 		}
 	}
@@ -174,22 +180,27 @@ func connectObject(disp *ole.IDispatch, iid *ole.GUID, idisp any) (point *ole.IC
 }
 
 type COMEventSink struct {
-	disp      *ole.IDispatch
+	disp            *ole.IDispatch
+	releaser        *olejunk.OleReleaser
 	callbackHandler COMEventCallback
 	connectionPoint *ole.IConnectionPoint
 	cookie          uint32
 }
 
-func NewCOMEventSink(disp *ole.IDispatch, handler TunesEventHandler) (*COMEventSink, error) {
-	return &COMEventSink{
-		disp: disp,
+
+func NewCOMEventSink(disp *ole.IDispatch, handler TunesEventHandler, releaser *olejunk.OleReleaser) (*COMEventSink, error) {
+	eventSink := COMEventSink{
+		disp:     disp,
+		releaser: releaser,
 		callbackHandler: COMEventCallback{
-			handler: handler,
+			handler:  handler,
 		},
-	}, nil
+	}
+
+	return &eventSink, nil
 }
 
-func NewTunesDispatch() (*ole.IDispatch, error) {
+func NewTunesDispatch(releaser *olejunk.OleReleaser) (*ole.IDispatch, error) {
 	// https://learn.microsoft.com/en-us/windows/win32/api/objbase/ne-objbase-coinit
 	ole.CoInitializeEx(uintptr(0), ole.COINIT_MULTITHREADED)
 
@@ -198,9 +209,9 @@ func NewTunesDispatch() (*ole.IDispatch, error) {
 		log.Fatalf("failed to create object: %v", err)
 		return nil, err
 	}
-	defer unknown.Release()
 
 	iTunesDispatch, err := unknown.QueryInterface(ole.IID_IDispatch)
+	releaser.Add(&iTunesDispatch.IUnknown)
 	return iTunesDispatch, err
 }
 
@@ -221,6 +232,7 @@ func (c *COMEventSink) DisconnectObject() {
 func (c *COMEventSink) ListenEvents() error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
+	
 	log.Info("setting the event receiver up")
 	defer ole.CoUninitialize()
 	iid, err := ole.CLSIDFromString(IID_IiTunesEvents)

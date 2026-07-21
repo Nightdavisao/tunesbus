@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sync"
 	"syscall"
 	"tunesbus/internal/olejunk"
 	"tunesbus/internal/wine"
@@ -17,22 +16,20 @@ import (
 	"github.com/go-ole/go-ole/oleutil"
 )
 
-func GetCurrentTrack(disp *ole.IDispatch) (*IiTrack, error) {
+func GetCurrentTrack(disp *ole.IDispatch, releaser *olejunk.OleReleaser) (*IiTrackData, error) {
 	if disp != nil {
 		trackProp, err := oleutil.GetProperty(disp, "CurrentTrack")
 		if err != nil {
 			return nil, err
 		}
-		defer trackProp.Clear()
 
 		trackDispatch := trackProp.ToIDispatch()
 		if trackDispatch == nil {
 			return nil, nil
 		}
-		trackDispatch.AddRef()
-		defer trackDispatch.Release()
+		releaser.Add(&trackDispatch.IUnknown)
 
-		track, err := olejunk.GetCOMObject[IiTrack](trackDispatch, IID_IiTrack)
+		track, err := olejunk.GetCOMObject[IiTrackData](trackDispatch, IID_IiTrack, releaser)
 		return track, err
 	}
 	return nil, errors.New("disp is not ready")
@@ -62,24 +59,18 @@ func GetCurrentTunes(disp *ole.IDispatch) (*IiTunes, error) {
 	}, nil
 }
 
-var mu sync.Mutex
 
-func SaveArtworkIfAvaliable(trackDisp *ole.IDispatch, track *IiTrack) (string, error) {
-	mu.Lock()
-	defer mu.Unlock()
-
+func SaveArtworkIfAvaliable(trackDisp *ole.IDispatch, trackId int32, releaser *olejunk.OleReleaser) (string, error) {
 	artworkCollection, err := oleutil.GetProperty(trackDisp, "Artwork")
 	if err != nil {
 		return "", err
 	}
-	defer artworkCollection.Clear()
 
 	artworkCollectionDisp := artworkCollection.ToIDispatch()
 	if artworkCollectionDisp == nil {
 		return "", nil
 	}
-	artworkCollectionDisp.AddRef()
-	defer artworkCollectionDisp.Release()
+	releaser.Add(&artworkCollectionDisp.IUnknown)
 
 	count, err := olejunk.GetPropertyFromIDispatch[int32](artworkCollectionDisp, "Count")
 	if err != nil {
@@ -99,8 +90,7 @@ func SaveArtworkIfAvaliable(trackDisp *ole.IDispatch, track *IiTrack) (string, e
 	if itemDisp == nil {
 		return "", nil
 	}
-	itemDisp.AddRef()
-	defer itemDisp.Release()
+	releaser.Add(&itemDisp.IUnknown)
 
 	artworkFormat, err := olejunk.GetPropertyFromIDispatch[ArtworkFormat](itemDisp, "Format")
 	if err != nil {
@@ -124,7 +114,7 @@ func SaveArtworkIfAvaliable(trackDisp *ole.IDispatch, track *IiTrack) (string, e
 	if err := os.MkdirAll(busTmpDir, 0o755); err != nil {
 		return "", err
 	}
-	artworkPath := wine.WindowsPathJoin(busTmpDir, fmt.Sprintf("tmp-%d%s", track.TrackID, fileSuffix))
+	artworkPath := wine.WindowsPathJoin(busTmpDir, fmt.Sprintf("tmp-%d%s", trackId, fileSuffix))
 
 	fileInfo, statErr := os.Stat(artworkPath)
 	if statErr != nil {
@@ -206,9 +196,9 @@ func GetPlayerButtonsState(disp *ole.IDispatch) (prevEnabled bool, state int32, 
 	return prev != 0, state, next != 0, nil
 }
 
-func SafeGetCurrentPlaylist(tunesDisp *ole.IDispatch) (*ole.IDispatch, error) {
+func SafeGetCurrentPlaylist(tunesDisp *ole.IDispatch, releaser *olejunk.OleReleaser) (*ole.IDispatch, error) {
 	// safety check
-	track, err := GetCurrentTrack(tunesDisp)
+	track, err := GetCurrentTrack(tunesDisp, releaser)
 	if err != nil {
 		return nil, err
 	}
@@ -223,10 +213,7 @@ func SafeGetCurrentPlaylist(tunesDisp *ole.IDispatch) (*ole.IDispatch, error) {
 		playlistDisp := currentPlaylist.ToIDispatch()
 
 		if playlistDisp != nil {
-			// Increments the reference count for an interface pointer to a COM object.
-			// You should call this method whenever you make a copy of an interface pointer
-			// https://learn.microsoft.com/en-us/windows/win32/api/unknwn/nf-unknwn-iunknown-addref
-			playlistDisp.AddRef()
+			releaser.Add(&playlistDisp.IUnknown)
 			return playlistDisp, nil
 		}
 	}
