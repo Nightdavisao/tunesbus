@@ -60,7 +60,10 @@ func repeatModeToLoopStatus(mode itunes.ITPlayerRepeatMode) types.LoopStatus {
 }
 
 func getPlaylistOptions(tunesDisp *ole.IDispatch) (bool, types.LoopStatus, bool, error) {
-	playlistDisp, err := itunes.SafeGetCurrentPlaylist(tunesDisp, _releaser)
+	releaser := olejunk.NewOleReleaser()
+	defer releaser.Release()
+	
+	playlistDisp, err := itunes.SafeGetCurrentPlaylist(tunesDisp, releaser)
 	if err != nil {
 		return false, types.LoopStatusNone, false, err
 	}
