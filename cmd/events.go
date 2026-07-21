@@ -19,6 +19,7 @@ type tunesEventHandler struct {
 
 func (m *tunesEventHandler) OnPlayerPlayEvent(t *itunes.IiTrackData, dispatch *ole.IDispatch) {
 	log.Debug("received OnPlayerPlayEvent", t)
+	m.state.ensureMprisStarted()
 
 	err := setPlayerMetadata(t, m.state)
 	if err != nil {
@@ -32,7 +33,6 @@ func (m *tunesEventHandler) OnPlayerPlayEvent(t *itunes.IiTrackData, dispatch *o
 		log.Warn("MPRIS server is not ready yet, skipping play emit")
 		return
 	}
-
 	m.state.emitInitialMprisState()
 	m.state.emitPlaybackChanges(changes)
 }

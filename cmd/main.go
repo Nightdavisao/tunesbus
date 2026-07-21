@@ -61,6 +61,7 @@ type MainState struct {
 }
 
 func (state *MainState) ensureMprisStarted() {
+	log.Debug("ensureMprisStarted called")
 	state.sync.mprisStartOnce.Do(func() {
 		go state.startServingBus(state.server)
 	})
@@ -111,7 +112,7 @@ func (state *MainState) startServingBus(s *server.Server) {
 }
 
 func (state *MainState) startTicker() {
-	optionsTicker := time.NewTicker(2 * time.Second)
+	optionsTicker := time.NewTicker(1 * time.Second)
 	defer optionsTicker.Stop()
 
 	for {
@@ -249,6 +250,7 @@ func main() {
 }
 
 func (state *MainState) QuitSafely(err error, message string) {
+	log.Debug("QuitSafety called", "error", err, "message", message)
 	defer _releaser.Release()
 	
 	if state.server.Conn != nil {
