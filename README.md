@@ -7,10 +7,11 @@ An experimental MPRIS integration for iTunes (running on Wine, Linux)
 * [GitHub mirror](https://github.com/Nightdavisao/tunesbus)  
 
 ## How to run
-First, open iTunes. Then, open this program. This should be all.  
-You can also just open this program and it'll open iTunes anyway. That's just how Windows' OLE/COM works, I didn't write any code to do this. :)
+First, open iTunes. Then, open this program. This should be all. You can also just open this program and it'll open iTunes anyway. 
 
-### How to run iTunes itself
+tunesbus will create a configuration file in the executable path if there's no existing one. Currently, the options avaliable for configuration are only related to how the MRPIS server will identify itself to clients. You might want to change the `BusNameSuffix` value to `cider`, if you want it to be picked up by Music Presence, for example.
+
+### How to run iTunes itself?
 Refer to [this page](./docs/iTunes.md).
 
 ## Cloning and compiling
