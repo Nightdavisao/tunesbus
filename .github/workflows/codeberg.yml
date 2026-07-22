@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  push_to_codeberg:
+  push-codeberg:
     runs-on: ubuntu-latest
     
     steps:
