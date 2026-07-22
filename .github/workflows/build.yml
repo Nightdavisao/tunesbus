@@ -1,0 +1,33 @@
+name: Build executable
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+
+      - name: Build
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: 0
+        run: |
+          go build -ldflags="-s -w" -o tunesbus.exe ./cmd/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tunesbus
+          path: tunesbus.exe
