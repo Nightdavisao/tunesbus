@@ -16,8 +16,15 @@ type MprisSection struct {
 	DesktopEntry  string
 }
 
+type MetadataSection struct {
+	// what string should be used for the album artist field if the track is from a compilation, but has no album artist tag?
+	// the default is "Various Artists"
+	CompilationBoolAsString string
+}
+
 type ProgramConfig struct {
-	MPRIS MprisSection
+	MPRIS    MprisSection
+	Metadata MetadataSection
 }
 
 const CONFIG_FILE = "config.toml"
@@ -27,6 +34,9 @@ var programConfig = &ProgramConfig{
 		Identity:      "iTunes",
 		BusNameSuffix: "iTunes",
 		DesktopEntry:  "iTunes",
+	},
+	Metadata: MetadataSection{
+		CompilationBoolAsString: "Various Artists",
 	},
 }
 

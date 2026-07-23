@@ -23,6 +23,7 @@ type IiTrackData struct {
 	TrackNumber int64 `com:"TrackNumber,allowempty"`
 	TrackCount  int64 `com:"TrackCount,allowempty"`
 	TrackID     int64 `com:"trackID"`
+	Compilation bool  `com:"Compilation,allowempty"`
 }
 
 type ArtworkFormat int32

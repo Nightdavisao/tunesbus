@@ -25,9 +25,15 @@ func setPlayerMetadata(track *itunes.IiTrackData, state *MainState) error {
 	state.mux.Lock()
 	defer state.mux.Unlock()
 
+	albumArtist := track.AlbumArtist
+
+	if albumArtist == "" {
+		albumArtist = state.config.Metadata.CompilationBoolAsString
+	}
+
 	if track != nil {
 		state.currentMetadata = &types.Metadata{
-			AlbumArtist: []string{track.AlbumArtist},
+			AlbumArtist: []string{albumArtist},
 			Album:       track.Album,
 			Title:       track.Name,
 			Artist:      []string{track.Artist},
