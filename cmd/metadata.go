@@ -24,11 +24,14 @@ func secondsToMicro(seconds int64) int64 {
 func setPlayerMetadata(track *itunes.IiTrackData, state *MainState) error {
 	state.mux.Lock()
 	defer state.mux.Unlock()
-
+	log.Debug("setPlayerMetadata", "track", track)
+	
 	albumArtist := track.AlbumArtist
 
-	if albumArtist == "" && track.Compilation {
-		albumArtist = state.config.Metadata.CompilationBoolAsString
+	if albumArtist == "" {
+		if track.Compilation {
+			albumArtist = state.config.Metadata.CompilationBoolAsString
+		}
 	}
 
 	if track != nil {
