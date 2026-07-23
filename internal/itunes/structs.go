@@ -15,12 +15,13 @@ type TunesEventHandler interface {
 
 type IiTrackData struct {
 	Name        string
-	Artist      string
-	Album       string
+	Artist      string `com:"Artist,allowempty"`
+	AlbumArtist string `com:"AlbumArtist,allowempty"`
+	Album       string `com:"Album,allowempty"`
 	Duration    int64
-	DiscNumber  int64
-	TrackNumber int64
-	TrackCount  int64
+	DiscNumber  int64 `com:"DiscNumber,allowempty"`
+	TrackNumber int64 `com:"TrackNumber,allowempty"`
+	TrackCount  int64 `com:"TrackCount,allowempty"`
 	TrackID     int64 `com:"trackID"`
 }
 

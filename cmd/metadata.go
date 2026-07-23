@@ -27,6 +27,7 @@ func setPlayerMetadata(track *itunes.IiTrackData, state *MainState) error {
 
 	if track != nil {
 		state.currentMetadata = &types.Metadata{
+			AlbumArtist: []string{track.AlbumArtist},
 			Album:       track.Album,
 			Title:       track.Name,
 			Artist:      []string{track.Artist},

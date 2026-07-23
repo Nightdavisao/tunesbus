@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 
+	"github.com/charmbracelet/log"
 	ole "github.com/go-ole/go-ole"
 	"github.com/go-ole/go-ole/oleutil"
 )
@@ -20,25 +22,40 @@ func UnmarshalCOM(disp *ole.IDispatch, dst any) error {
 	for i := 0; i < rt.NumField(); i++ {
 		field := rt.Field(i)
 		fv := rv.Field(i)
-		tag, ok := field.Tag.Lookup("com")
-		
-		if ok && tag == "-" {
+
+		tag := field.Tag.Get("com")
+		if tag == "-" {
 			continue
 		}
 
-		propName := field.Name
-		if ok && tag != "" {
-			propName = tag
+		parts := strings.Split(tag, ",")
+		propName := parts[0]
+		if propName == "" {
+			propName = field.Name
+		}
+
+		allowEmpty := false
+		for _, opt := range parts[1:] {
+			if opt == "allowempty" {
+				allowEmpty = true
+			}
 		}
 
 		variant, err := oleutil.GetProperty(disp, propName)
 		if err != nil {
-			return fmt.Errorf("get property %q for field %q: %w", tag, field.Name, err)
+			if allowEmpty {
+				// the code is the DISP_E_UNKNOWNNAME constant apparently...?
+				if oleErr, ok := err.(*ole.OleError); ok && oleErr.Code() == 2147614726 {
+					continue
+				}
+			}
+			log.Debugf("error getting prop %s for field %q: %v", propName, field.Name, err)
+			return fmt.Errorf("get property %q for field %q: %w", propName, field.Name, err)
 		}
 
 		if err := assign(fv, variant); err != nil {
 			variant.Clear()
-			return fmt.Errorf("assign property %q to field %q: %w", tag, field.Name, err)
+			return fmt.Errorf("assign property %q to field %q: %w", propName, field.Name, err)
 		}
 		variant.Clear()
 	}
