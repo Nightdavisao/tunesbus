@@ -129,19 +129,30 @@ func (m *BusPlayer) PlaybackStatus() (types.PlaybackStatus, error) {
 	log.Debug("PlaybackStatus called")
 	m.state.mux.RLock()
 	defer m.state.mux.RUnlock()
+	
+	releaser := olejunk.NewOleReleaser()
+	defer releaser.Release()
+	
+	defaultState := types.PlaybackStatusStopped
 
 	if !m.state.playbackState.hasPlayerState {
-		return types.PlaybackStatusPaused, nil
+		return defaultState, nil
 	}
 
 	switch m.state.playbackState.playerState {
+	case itunes.ITPlayerStateFastForward:
+	case itunes.ITPlayerStateRewind:
 	case itunes.ITPlayerStatePlaying:
 		return types.PlaybackStatusPlaying, nil
-	case itunes.ITPlayerStateStopped:
-		return types.PlaybackStatusStopped, nil
 	default:
-		return types.PlaybackStatusPaused, nil
+		// only set as "stopped" if there's no targeted playlist, iTunes' COM has no such concept of a "paused" playback
+		playlist, _ := itunes.SafeGetCurrentPlaylist(m.state.tunesDisp, releaser)
+
+		if playlist != nil {
+			return types.PlaybackStatusPaused, nil
+		}	
 	}
+	return defaultState, nil
 }
 
 func (m *BusPlayer) Rate() (float64, error) {
