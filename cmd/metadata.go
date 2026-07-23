@@ -33,7 +33,6 @@ func setPlayerMetadata(track *itunes.IiTrackData, state *MainState) error {
 
 	if track != nil {
 		state.currentMetadata = &types.Metadata{
-			AlbumArtist: []string{albumArtist},
 			Album:       track.Album,
 			Title:       track.Name,
 			Artist:      []string{track.Artist},
@@ -41,6 +40,10 @@ func setPlayerMetadata(track *itunes.IiTrackData, state *MainState) error {
 			DiscNumber:  int(track.DiscNumber),
 			TrackNumber: int(track.TrackNumber),
 			TrackId:     dbus.ObjectPath(fmt.Sprintf("/org/itunes/track/%d", track.TrackID)),
+		}
+
+		if albumArtist != "" {
+			state.currentMetadata.AlbumArtist = []string{albumArtist}
 		}
 	}
 	if state.server.Conn == nil {
