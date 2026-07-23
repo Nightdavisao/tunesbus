@@ -27,7 +27,7 @@ func setPlayerMetadata(track *itunes.IiTrackData, state *MainState) error {
 
 	albumArtist := track.AlbumArtist
 
-	if albumArtist == "" {
+	if albumArtist == "" && track.Compilation {
 		albumArtist = state.config.Metadata.CompilationBoolAsString
 	}
 
